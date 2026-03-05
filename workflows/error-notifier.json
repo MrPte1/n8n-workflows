@@ -1,0 +1,51 @@
+{
+  "id": "error-notifier",
+  "name": "Pipeline Error Notifier",
+  "active": true,
+  "nodes": [
+    {
+      "id": "node-error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "parameters": {}
+    },
+    {
+      "id": "node-build-error-body",
+      "name": "Build Error Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "jsCode": "const err = $input.first().json;\nconst node = err.execution && err.execution.lastNodeExecuted || 'unknown node';\nconst msg = err.execution && err.execution.error && err.execution.error.message || 'unknown error';\nconst wf = err.workflow && err.workflow.name || 'pipeline';\n\nconst text = `\u26a0\ufe0f <b>Pipeline failed</b>\\n<b>Workflow:</b> ${wf}\\n<b>Failed at:</b> <code>${node}</code>\\n<b>Error:</b> <code>${msg.substring(0, 300)}</code>`;\n\nconst botToken = $env.PIPELINE_BOT_TOKEN;\nconst chatId = $env.PIPELINE_CHAT_ID;\n\nif (!botToken || !chatId) {\n  throw new Error('PIPELINE_BOT_TOKEN or PIPELINE_CHAT_ID env vars not set');\n}\n\nreturn [{ json: {\n  url: `https://api.telegram.org/bot${botToken}/sendMessage`,\n  body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })\n} }];\n"
+      }
+    },
+    {
+      "id": "node-send-error-tg",
+      "name": "Send Error Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [[{ "node": "Build Error Body", "type": "main", "index": 0 }]]
+    },
+    "Build Error Body": {
+      "main": [[{ "node": "Send Error Notification", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

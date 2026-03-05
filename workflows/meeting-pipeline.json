@@ -1,0 +1,491 @@
+{
+  "updatedAt": "2026-03-05T05:15:46.195Z",
+  "createdAt": "2026-03-05T05:14:48.025Z",
+  "id": "ONMhdgDlWXApUtQc",
+  "name": "Meeting Audio Pipeline",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meeting-audio",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c4c621aa-29ac-4304-80da-91ea119c33fa",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        -96
+      ],
+      "webhookId": "meeting-audio"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Pipeline started",
+        "options": {}
+      },
+      "id": "03d01032-b6ce-449c-97ef-980a123db747",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/bot{{ $json.body.bot_token }}/getFile?file_id={{ $json.body.file_id }}",
+        "options": {}
+      },
+      "id": "26ddb4a7-43a7-44f3-8f8f-274e3f661891",
+      "name": "Get File Path",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -48,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/file/bot{{ $('Webhook').item.json.body.bot_token }}/{{ $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "59ad3f4a-97c4-4d2f-8062-662af55b3633",
+      "name": "Download Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        160,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/jobs",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "diarize",
+              "value": "true"
+            },
+            {
+              "name": "language_hint",
+              "value": "fi"
+            },
+            {
+              "name": "participants",
+              "value": "={{ $('Webhook').item.json.body.participants && $('Webhook').item.json.body.participants.length ? JSON.stringify($('Webhook').item.json.body.participants) : '[]' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6b0fb9b5-ba8e-45bd-a1c6-3f9968ea4d6d",
+      "name": "Submit Transcription Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        352,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/jobs/{{ $('Submit Transcription Job').item.json.job_id }}",
+        "options": {}
+      },
+      "id": "313a469f-f24b-4b1e-91a9-02beee04af9d",
+      "name": "Poll Job Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-done",
+              "leftValue": "={{ $json.status.status }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b80c49c3-3051-42c2-b091-bd762cbc8cc3",
+      "name": "Check Status",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        752,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 15
+      },
+      "id": "b01f30e5-aeb5-41bf-ac8e-2d9502f33b56",
+      "name": "Wait 15s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        560,
+        224
+      ],
+      "webhookId": "4da3c382-b085-45c0-9cf6-7502b0974ddf"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/jobs/{{ $('Submit Transcription Job').item.json.job_id }}/artifacts/transcript.txt",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "67b1fc54-b48e-4480-a210-e1d0594795ee",
+      "name": "Get Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "e8856f06-6f93-4277-aac6-27bc790be6cc",
+      "name": "Generate Meeting Minutes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1152,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8090/api/create_note",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "815b26e8-5e74-4c52-b337-d7fba2697266",
+      "name": "Create Vault Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Webhook').first().json.body.bot_token }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "5ca53d4d-0b99-4a47-9ca4-c44a53e5f3cc",
+      "name": "Send Telegram Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1552,
+        -96
+      ]
+    },
+    {
+      "id": "node-build-llm-body",
+      "name": "Build LLM Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1550,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst date = webhookBody.date || new Date().toISOString().split('T')[0];\nconst participants = webhookBody.participants;\nconst participantStr = Array.isArray(participants) && participants.length\n    ? participants.join(', ') : '';\nconst meetingName = webhookBody.meeting_name || '';\nconst startTime = webhookBody.start_time || '';\nconst endTime = webhookBody.end_time || '';\nconst transcript = $input.first().json.data;\n\nconst systemPrompt = `You create meeting minutes from transcripts.\nOutput must be exactly ONE markdown document.\nLanguage: Business American English.\n\n== PHASE 1 \u2014 SPEAKER IDENTIFICATION ==\nBefore writing, read the entire transcript carefully.\nBuild a speaker map: identify who each labeled speaker ([SPEAKER_00], [Petri], [Speaker 0], etc.) actually is.\n\nLook for these clues in order:\n1. Self-introductions: \"I'm [name]\", \"This is [name]\", \"my name is [name]\"\n2. Direct address: \"thanks [name]\", \"[name], can you...\", \"[name] what do you think\"\n3. Role or ownership signals: \"my project\", \"my team\", \"the system I built\", \"I own this\"\n4. Cross-reference with the known participants list in the user message\n\nWrite your speaker map as a comment block at the very start:\n<!-- Speaker map: SPEAKER_00 = Petri, SPEAKER_01 = Mikko -->\n\nThen use the CORRECTED names throughout. If a speaker cannot be confidently identified, use [[Speaker N]].\n\n== PHASE 2 \u2014 MEETING MINUTES ==\n\nFACT RULES:\n- Do NOT invent facts. Use ONLY provided metadata and explicit transcript content.\n- If something is unknown, leave it blank.\n\nATTENDEES:\n- Always include [[Rantala Petri]].\n- Add others only if explicitly identified in the transcript.\n\nNAMES:\n- Obsidian wikilinks: [[Lastname Firstname]] if both known, else [[FirstName]] or [[Speaker N]].\n- Never guess last names.\n\nSTRUCTURE:\n- Use the markdown skeleton exactly. Preserve headings and order.\n- Repeat '### <topic name>' blocks for each distinct topic.\n\nAGENDA:\n- Bulleted list of Obsidian heading links [[# Topic heading]] for each topic in ## Notes.\n\nCONTENT RICHNESS \u2014 CRITICAL:\n- Capture ALL information from the transcript. Do NOT summarize away detail.\n- Each topic must reflect what was actually said: specific numbers, dates, systems, names, constraints.\n- Include direct quotes for key statements (> blockquote format).\n- Capture ALL decisions (major and minor) with rationale if stated.\n- Capture ALL action items \u2014 explicit and implicit.\n- Use multiple '### <sub-topic>' blocks rather than truncating content.\n- Length must match depth of conversation. 1-hour meeting \u2192 comprehensive notes.\n- Never repeat the same bullet. If you find yourself writing the same sentence twice, stop and write something different or move on.\n\nTOPIC BLOCK FORMAT (MANDATORY):\n### <topic name>\n<One sentence outcome-oriented summary>\n**Key Points:**\n- <concrete bullet \u2014 include specifics: numbers, owners, systems, dates>\n**Outcome:** <Decision made | Action(s) created | No outcome>\n\nACTION POINT FORMAT:\n- [ ] ***Action Point:*** **What:** <description> **Who:** [[Name]] **When:** [[YYYY-MM-DD or TBD]]\n\nDECISION FORMAT:\n- ***Decision:*** **What:** <description>\n\nSCREENSHOT RULES:\n- Only list screenshots that were explicitly announced in the transcript. Do not invent them.\n\nMARKDOWN SKELETON:\n---\n- **Date:** [[<date>]]\n- **Start Time:** <hh:mm>\n- **End Time:** <hh:mm>\n- **Attendees:**\n- [x] [[<People>]]\n\n#### Link(s) to project(s) or note(s) if any\n-\n\n## Meeting Summary\n\n## Agenda\n\n## Notes\n\n### <topic name>\n\n## Screenshots\n`;\n\nconst userMsg = `Meeting metadata:\n- Date: ${date}\n- Start time: ${startTime || 'unknown'}\n- End time: ${endTime || 'unknown'}\n- Meeting name: ${meetingName}\n- Known participants: ${participantStr || 'unknown'}\n\nTranscript:\n${transcript}`;\n\nreturn [{ json: {\n    body: JSON.stringify({\n        model: 'qwen3.5:27b',\n        stream: false,\n        think: false,\n        num_ctx: 65536,\n        system: systemPrompt,\n        prompt: userMsg\n    })\n} }];\n"
+      }
+    },
+    {
+      "id": "node-build-note-body",
+      "name": "Build Note Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1750,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst date = webhookBody.date || new Date().toISOString().split('T')[0];\nconst meetingName = webhookBody.meeting_name || 'Meeting';\n\nconst resp = $input.first().json;\nconst minutes = $input.first().json.response;\n\nif (!minutes) {\n    throw new Error('No minutes from Claude: ' + JSON.stringify(resp).substring(0, 300));\n}\n\nconst now = new Date();\nconst createdAt = now.toLocaleString('fi-FI', {\n    timeZone: 'Europe/Helsinki',\n    year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit'\n}).replace(',', '');\n\nconst header = `<div style=\"font-size: 0.5em;\"> These notes were created using a temporary audio recording of a meeting held on ${date}. The audio was transcribed using a cloud-based service to support accurate note-taking. The recording was deleted immediately after transcription. The final document is stored locally and not shared externally. </div>\n\nMinutes created: ${createdAt} \u00a9 Petri Rantala\nTags: #\ud83d\udcd3 \u2696 \u2705 \ud83e\udd1d\nTemplate Version: 1.8\n\n---\n\n`;\n\nconst path = `100 - Meeting minutes/${date} ${meetingName}.md`;\nreturn [{ json: { body: JSON.stringify({ path, content: header + minutes, overwrite: true }) } }];\n"
+      }
+    },
+    {
+      "id": "node-build-tg-body",
+      "name": "Build Telegram Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1950,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst date = webhookBody.date || '';\nconst meetingName = webhookBody.meeting_name || 'Meeting';\nconst chatId = webhookBody.chat_id;\n\nconst text = `<b>Meeting minutes saved</b>\\n<code>100 - Meeting minutes/${date} ${meetingName}.md</code>\\n\\nSummary ready.`;\n\nreturn [{ json: { body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }) } }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get File Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Path": {
+      "main": [
+        [
+          {
+            "node": "Download Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Audio": {
+      "main": [
+        [
+          {
+            "node": "Submit Transcription Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Transcription Job": {
+      "main": [
+        [
+          {
+            "node": "Poll Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Job Status": {
+      "main": [
+        [
+          {
+            "node": "Check Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status": {
+      "main": [
+        [
+          {
+            "node": "Get Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 15s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 15s": {
+      "main": [
+        [
+          {
+            "node": "Poll Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Transcript": {
+      "main": [
+        [
+          {
+            "node": "Build LLM Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Meeting Minutes": {
+      "main": [
+        [
+          {
+            "node": "Build Note Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Vault Note": {
+      "main": [
+        [
+          {
+            "node": "Build Telegram Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LLM Body": {
+      "main": [
+        [
+          {
+            "node": "Generate Meeting Minutes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Note Body": {
+      "main": [
+        [
+          {
+            "node": "Create Vault Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Telegram Body": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "errorWorkflow": "error-notifier"
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "fdc19e37-b077-4bd9-8b98-ea10693bca44",
+  "activeVersionId": "fdc19e37-b077-4bd9-8b98-ea10693bca44",
+  "versionCounter": 4,
+  "triggerCount": 1,
+  "tags": [
+    {
+      "updatedAt": "2026-03-05T05:15:37.675Z",
+      "createdAt": "2026-03-05T05:15:37.675Z",
+      "id": "rCgNlofDBfsepnPo",
+      "name": "v2"
+    }
+  ],
+  "shared": [
+    {
+      "updatedAt": "2026-03-05T05:14:48.056Z",
+      "createdAt": "2026-03-05T05:14:48.056Z",
+      "role": "workflow:owner",
+      "workflowId": "ONMhdgDlWXApUtQc",
+      "projectId": "s0d8HfTyYcsGfusL",
+      "project": {
+        "updatedAt": "2026-03-05T05:30:48.187Z",
+        "createdAt": "2026-03-04T15:03:46.122Z",
+        "id": "s0d8HfTyYcsGfusL",
+        "name": "Unnamed Project",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "3ce1f55c-f54a-4380-92ec-b38b50554a86"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version fdc19e37",
+    "description": ""
+  }
+}
