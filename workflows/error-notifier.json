@@ -24,17 +24,19 @@
     {
       "id": "node-send-error-tg",
       "name": "Send Error Notification",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
       "position": [480, 0],
       "parameters": {
-        "method": "POST",
-        "url": "=https://api.telegram.org/bot{{ $env.PIPELINE_BOT_TOKEN }}/sendMessage",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ chat_id: $env.PIPELINE_CHAT_ID, text: $json.text, parse_mode: 'HTML' }) }}",
-        "options": {}
-      }
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "1502389483",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {}
     }
   ],
   "connections": {
