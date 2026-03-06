@@ -1,0 +1,315 @@
+{
+  "id": "email-attachment-ingestion",
+  "name": "Email Attachment Ingestion",
+  "description": "Polls Gmail for new emails, converts attachments via markitdown-service, saves to Obsidian vault with YAML frontmatter, indexes to RAG, and sends Telegram notification.",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "downloadAttachments": true,
+        "options": {}
+      },
+      "id": "node-gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-oauth2",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-has-attachments",
+              "leftValue": "={{ Object.keys($binary || {}).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if-attachments",
+      "name": "Has Attachments?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -192,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split one email item (with N binary props) into N items, one per attachment.\n// Each output item has a normalised binary key 'file' for the HTTP POST downstream.\nconst items = [];\nconst emailJson = $input.first().json;\nconst emailBinary = $input.first().binary || {};\n\nfor (const [key, binaryData] of Object.entries(emailBinary)) {\n  items.push({\n    json: {\n      sender: emailJson.from?.value?.[0]?.address || emailJson.from || '',\n      subject: emailJson.subject || '',\n      date: emailJson.date || new Date().toISOString(),\n      originalFilename: binaryData.fileName || key,\n      mimeType: binaryData.mimeType || 'application/octet-stream',\n    },\n    binary: { file: binaryData },\n  });\n}\n\nreturn items;\n"
+      },
+      "id": "node-split-attachments",
+      "name": "Split Attachments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8800/convert",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "file"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 360000
+        }
+      },
+      "id": "node-post-convert",
+      "name": "POST /convert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        192,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build YAML frontmatter + note body.\n// Note name: YYYY-MM-DD + markitdown title (fallback: filename → subject)\nconst conv = $input.first().json;  // { markdown, title, filename, source_type }\nconst email = $('Split Attachments').first().json;\n\n// Date from email (ISO string)\nconst d = new Date(email.date);\nconst dateStr = isNaN(d.getTime())\n  ? new Date().toISOString().split('T')[0]\n  : d.toISOString().split('T')[0];\n\n// Title fallback chain: markitdown title → filename stem → email subject → 'untitled'\nconst rawTitle = (conv.title || '').trim()\n  || (email.originalFilename || '').replace(/\\.[^.]+$/, '').trim()\n  || (email.subject || '').trim()\n  || 'untitled';\nconst safeTitle = rawTitle.replace(/[\\/\\\\:*?\"<>|]/g, '-').substring(0, 100).trim();\nconst noteName = `${dateStr} ${safeTitle}`;\nconst path = `002 - incoming/${noteName}.md`;\n\n// YAML frontmatter\nconst subjectSafe = (email.subject || '').replace(/\"/g, \"'\");\nconst fm = [\n  '---',\n  `sender: \"${email.sender || email.from || ''}\"`,\n  `subject: \"${subjectSafe}\"`,\n  `received: ${dateStr}`,\n  `source_type: ${conv.source_type || 'document'}`,\n  '---',\n].join('\\n');\n\nconst content = `${fm}\\n\\n${conv.markdown || ''}`;\n\nreturn [{ json: {\n  body: JSON.stringify({ path, content, overwrite: false }),\n  path,\n  markdown: conv.markdown || '',\n  noteName,\n} }];\n"
+      },
+      "id": "node-build-note-body",
+      "name": "Build Note Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8090/api/create_note",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-create-vault-note",
+      "name": "Create Vault Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        576,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const note = $('Build Note Body').first().json;\nreturn [{ json: { body: JSON.stringify({\n  id: note.path,\n  text: note.markdown,\n  collection: 'vault',\n  metadata: { source: note.path, type: 'document' },\n}) } }];\n"
+      },
+      "id": "node-build-rag-body",
+      "name": "Build RAG Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8500/index",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 30000
+        },
+        "continueOnFail": true
+      },
+      "id": "node-index-rag",
+      "name": "Index to RAG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const note = $('Build Note Body').first().json;\nconst text = `Email attachment saved:\\n<b>${note.noteName}</b>\\n\\nFolder: 002 - incoming`;\nreturn [{ json: { body: JSON.stringify({\n  chat_id: $env.PIPELINE_CHAT_ID,\n  text,\n  parse_mode: 'HTML',\n}) } }];\n"
+      },
+      "id": "node-build-tg-body",
+      "name": "Build Telegram Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.PIPELINE_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-send-telegram",
+      "name": "Send Telegram Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        -112
+      ]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Has Attachments?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Attachments?": {
+      "main": [
+        [
+          {
+            "node": "Split Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Attachments": {
+      "main": [
+        [
+          {
+            "node": "POST /convert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /convert": {
+      "main": [
+        [
+          {
+            "node": "Build Note Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Note Body": {
+      "main": [
+        [
+          {
+            "node": "Create Vault Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Vault Note": {
+      "main": [
+        [
+          {
+            "node": "Build RAG Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build RAG Body": {
+      "main": [
+        [
+          {
+            "node": "Index to RAG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Index to RAG": {
+      "main": [
+        [
+          {
+            "node": "Build Telegram Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Telegram Body": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "error-notifier",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {}
+}
