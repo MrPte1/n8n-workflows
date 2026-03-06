@@ -285,6 +285,22 @@
       "parameters": {
         "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst date = webhookBody.date || '';\nconst meetingName = webhookBody.meeting_name || 'Meeting';\nconst chatId = webhookBody.chat_id;\n\nconst safeName = meetingName.replace(/[\\/\\\\:*?\"<>|]/g, '-');\nconst text = `<b>Meeting minutes saved</b>\\n<code>100 - Meeting minutes/${date} ${safeName}.md</code>\\n\\nSummary ready.`;\n\nreturn [{ json: { body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }) } }];\n"
       }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=http://host.docker.internal:8000/jobs/{{ $('Submit Transcription Job').item.json.job_id }}",
+        "options": {}
+      },
+      "id": "node-delete-job",
+      "name": "Delete Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1752,
+        -96
+      ],
+      "continueOnFail": true
     }
   ],
   "connections": {
@@ -437,6 +453,17 @@
         [
           {
             "node": "Send Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Notification": {
+      "main": [
+        [
+          {
+            "node": "Delete Job",
             "type": "main",
             "index": 0
           }
