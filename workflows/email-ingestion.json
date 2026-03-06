@@ -129,7 +129,20 @@
     },
     {
       "parameters": {
-        "jsCode": "const note = $('Build Note Body').first().json;\nreturn [{ json: { body: JSON.stringify({\n  id: note.path,\n  text: note.markdown,\n  collection: 'vault',\n  metadata: { source: note.path, type: 'document' },\n}) } }];\n"
+        "jsCode": "// Build email body note — no attachment, save to 553 - emails/\n// Matches vault convention: frontmatter (subject/from/sent) + Send by [[Name]] + # Subject + body\nconst emailJson = $input.first().json;\n\nconst d = new Date(emailJson.date || new Date());\nconst dateStr = d.toISOString().split('T')[0];\nconst timeStr = `${d.getHours().toString().padStart(2,'0')}-${d.getMinutes().toString().padStart(2,'0')}`;\n\nconst subject = (emailJson.subject || 'no-subject').trim();\nconst safeSubject = subject.replace(/[\\/\\\\:*?\"<>|]/g, '-').substring(0, 100).trim();\nconst noteName = `${dateStr} ${timeStr} ${safeSubject}`;\nconst path = `553 - emails/${noteName}.md`;\n\n// Extract display name from \"Firstname Lastname <email>\" → reverse to \"Lastname Firstname\"\nconst fromRaw = emailJson.from || '';\nconst displayMatch = fromRaw.match(/^([^<]+)</) || fromRaw.match(/^([^@]+)/);\nconst displayName = (displayMatch ? displayMatch[1] : fromRaw).trim();\nconst nameParts = displayName.split(/\\s+/).filter(Boolean);\nconst wikiName = nameParts.length >= 2\n  ? `${nameParts[nameParts.length - 1]} ${nameParts.slice(0, -1).join(' ')}`\n  : displayName;\n\n// Sent in Finnish format: DD.MM.YYYY HH.MM.SS\nconst pad = n => n.toString().padStart(2, '0');\nconst sentFormatted = `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} ${pad(d.getHours())}.${pad(d.getMinutes())}.${pad(d.getSeconds())}`;\n\nconst body = (emailJson.text || '').trim();\n\nconst fm = ['---', `subject: ${subject}`, `from: ${wikiName}`, `sent: ${sentFormatted}`, '---'].join('\\n');\nconst content = `${fm}\\n\\nSend by [[${wikiName}]]\\n\\n# ${subject}\\n${body}`;\n\nreturn [{ json: {\n  body: JSON.stringify({ path, content, overwrite: false }),\n  path,\n  markdown: content,\n  noteName,\n} }];\n"
+      },
+      "id": "node-build-email-body",
+      "name": "Build Email Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const note = $input.first().json;\nreturn [{ json: { body: JSON.stringify({\n  id: note.path,\n  text: note.markdown,\n  collection: 'vault',\n  metadata: { source: note.path, type: 'document' },\n}) } }];\n"
       },
       "id": "node-build-rag-body",
       "name": "Build RAG Body",
@@ -163,7 +176,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const note = $('Build Note Body').first().json;\nconst text = `Email attachment saved:\\n<b>${note.noteName}</b>\\n\\nFolder: 002 - incoming`;\nreturn [{ json: { body: JSON.stringify({\n  chat_id: $env.PIPELINE_CHAT_ID,\n  text,\n  parse_mode: 'HTML',\n}) } }];\n"
+        "jsCode": "const note = $input.first().json;\nconst folder = note.path ? note.path.split('/')[0] : 'vault';\nconst text = `Email saved:\\n<b>${note.noteName}</b>\\n\\n<code>${note.path}</code>`;\nreturn [{ json: { body: JSON.stringify({\n  chat_id: $env.PIPELINE_CHAT_ID,\n  text,\n  parse_mode: 'HTML',\n}) } }];\n"
       },
       "id": "node-build-tg-body",
       "name": "Build Telegram Body",
@@ -210,6 +223,24 @@
         [
           {
             "node": "Split Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Email Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Email Body": {
+      "main": [
+        [
+          {
+            "node": "Create Vault Note",
             "type": "main",
             "index": 0
           }
