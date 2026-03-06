@@ -129,7 +129,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Build email body note — no attachment, save to 553 - emails/\n// Matches vault convention: frontmatter (subject/from/sent) + Send by [[Name]] + # Subject + body\nconst emailJson = $input.first().json;\n\nconst d = new Date(emailJson.date || new Date());\nconst dateStr = d.toISOString().split('T')[0];\nconst timeStr = `${d.getHours().toString().padStart(2,'0')}-${d.getMinutes().toString().padStart(2,'0')}`;\n\nconst subject = (emailJson.subject || 'no-subject').trim();\nconst safeSubject = subject.replace(/[\\/\\\\:*?\"<>|]/g, '-').substring(0, 100).trim();\nconst noteName = `${dateStr} ${timeStr} ${safeSubject}`;\nconst path = `553 - emails/${noteName}.md`;\n\n// Extract display name from \"Firstname Lastname <email>\" → reverse to \"Lastname Firstname\"\nconst fromRaw = emailJson.from || '';\nconst displayMatch = fromRaw.match(/^([^<]+)</) || fromRaw.match(/^([^@]+)/);\nconst displayName = (displayMatch ? displayMatch[1] : fromRaw).trim();\nconst nameParts = displayName.split(/\\s+/).filter(Boolean);\nconst wikiName = nameParts.length >= 2\n  ? `${nameParts[nameParts.length - 1]} ${nameParts.slice(0, -1).join(' ')}`\n  : displayName;\n\n// Sent in Finnish format: DD.MM.YYYY HH.MM.SS\nconst pad = n => n.toString().padStart(2, '0');\nconst sentFormatted = `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} ${pad(d.getHours())}.${pad(d.getMinutes())}.${pad(d.getSeconds())}`;\n\nconst body = (emailJson.text || '').trim();\n\nconst fm = ['---', `subject: ${subject}`, `from: ${wikiName}`, `sent: ${sentFormatted}`, '---'].join('\\n');\nconst content = `${fm}\\n\\nSend by [[${wikiName}]]\\n\\n# ${subject}\\n${body}`;\n\nreturn [{ json: {\n  body: JSON.stringify({ path, content, overwrite: false }),\n  path,\n  markdown: content,\n  noteName,\n} }];\n"
+        "jsCode": "// Extract email metadata and raw body text. Handles plain-text and HTML emails.\nconst emailJson = $input.first().json;\n\nconst d = new Date(emailJson.date || new Date());\nconst dateStr = d.toISOString().split('T')[0];\nconst pad = n => n.toString().padStart(2, '0');\nconst timeStr = `${pad(d.getHours())}-${pad(d.getMinutes())}`;\nconst sentFormatted = `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} ${pad(d.getHours())}.${pad(d.getMinutes())}.${pad(d.getSeconds())}`;\n\nconst subject = (emailJson.subject || 'no-subject').trim();\nconst safeSubject = subject.replace(/[\\/\\\\:*?\"<>|]/g, '-').substring(0, 100).trim();\nconst noteName = `${dateStr} ${timeStr} ${safeSubject}`;\nconst path = `553 - emails/${noteName}.md`;\n\n// Display name → Lastname Firstname wikilink\nconst fromRaw = emailJson.from || '';\nconst displayMatch = fromRaw.match(/^([^<]+)</) || fromRaw.match(/^([^@]+)/);\nconst displayName = (displayMatch ? displayMatch[1] : fromRaw).trim();\nconst nameParts = displayName.split(/\\s+/).filter(Boolean);\nconst wikiName = nameParts.length >= 2\n  ? `${nameParts[nameParts.length - 1]} ${nameParts.slice(0, -1).join(' ')}`\n  : displayName;\n\n// Body: prefer plain text; strip HTML tags as fallback\nfunction stripHtml(html) {\n  return html\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<br\\s*\\/?>/gi, '\\n')\n    .replace(/<\\/p>/gi, '\\n\\n')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"')\n    .replace(/[ \\t]{2,}/g, ' ')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\nconst rawBody = emailJson.text\n  ? emailJson.text.trim()\n  : emailJson.html ? stripHtml(emailJson.html) : '';\n\nreturn [{ json: { subject, wikiName, sentFormatted, dateStr, timeStr, noteName, path, rawBody } }];\n"
       },
       "id": "node-build-email-body",
       "name": "Build Email Body",
@@ -137,6 +137,52 @@
       "typeVersion": 2,
       "position": [
         0,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = $input.first().json;\nconst system = 'You are a concise executive assistant. Extract the key points from this email as 3-5 bullet points. Be specific: include names, numbers, dates, decisions, and action items where present. Output ONLY the bullet points starting with \"- \". No preamble, no headings.';\nconst prompt = `Subject: ${email.subject}\\nFrom: ${email.wikiName}\\nDate: ${email.sentFormatted}\\n\\n${email.rawBody}`;\nreturn [{ json: { body: JSON.stringify({ model: 'qwen3.5:27b', stream: false, think: false, num_ctx: 32768, system, prompt }) } }];\n"
+      },
+      "id": "node-build-ollama-email",
+      "name": "Build Ollama Email Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "node-generate-email-summary",
+      "name": "Generate Email Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        384,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Assemble final note: frontmatter + summary + full email body\nconst email = $('Build Email Body').first().json;\nconst summary = ($input.first().json.response || '').trim();\n\nconst fm = ['---', `subject: ${email.subject}`, `from: ${email.wikiName}`, `sent: ${email.sentFormatted}`, '---'].join('\\n');\nconst content = [\n  fm,\n  '',\n  `Send by [[${email.wikiName}]]`,\n  '',\n  `# ${email.subject}`,\n  '',\n  '## Key Points',\n  summary,\n  '',\n  '---',\n  '',\n  '## Full Email',\n  email.rawBody,\n].join('\\n');\n\nreturn [{ json: {\n  body: JSON.stringify({ path: email.path, content, overwrite: false }),\n  path: email.path,\n  markdown: content,\n  noteName: email.noteName,\n} }];\n"
+      },
+      "id": "node-assemble-email-note",
+      "name": "Assemble Email Note",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
         112
       ]
     },
@@ -237,6 +283,39 @@
       ]
     },
     "Build Email Body": {
+      "main": [
+        [
+          {
+            "node": "Build Ollama Email Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Ollama Email Body": {
+      "main": [
+        [
+          {
+            "node": "Generate Email Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Email Summary": {
+      "main": [
+        [
+          {
+            "node": "Assemble Email Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Email Note": {
       "main": [
         [
           {
