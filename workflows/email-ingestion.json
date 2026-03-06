@@ -34,7 +34,7 @@
           "conditions": [
             {
               "id": "cond-has-attachments",
-              "leftValue": "={{ Object.keys($binary || {}).length }}",
+              "leftValue": "={{ ($json.attachments || []).length }}",
               "rightValue": 0,
               "operator": {
                 "type": "number",
@@ -57,7 +57,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Split one email item (with N binary props) into N items, one per attachment.\n// Each output item has a normalised binary key 'file' for the HTTP POST downstream.\n// IMAP returns from as plain string: \"Name <email@example.com>\" or just \"email@example.com\"\nconst items = [];\nconst emailJson = $input.first().json;\nconst emailBinary = $input.first().binary || {};\n\nconst fromRaw = emailJson.from || '';\nconst senderMatch = fromRaw.match(/<([^>]+)>/) || fromRaw.match(/(\\S+@\\S+)/);\nconst sender = senderMatch ? senderMatch[1] : fromRaw;\n\nfor (const [key, binaryData] of Object.entries(emailBinary)) {\n  items.push({\n    json: {\n      sender,\n      subject: emailJson.subject || '',\n      date: emailJson.date || new Date().toISOString(),\n      originalFilename: binaryData.fileName || key,\n      mimeType: binaryData.mimeType || 'application/octet-stream',\n    },\n    binary: { file: binaryData },\n  });\n}\n\nreturn items;\n"
+        "jsCode": "// Split one email into N items, one per attachment.\n// Prefers $binary (n8n native binary), falls back to $json.attachments metadata.\nconst items = [];\nconst emailJson = $input.first().json;\nconst emailBinary = $input.first().binary || {};\n\nconst fromRaw = emailJson.from || '';\nconst senderMatch = fromRaw.match(/<([^>]+)>/) || fromRaw.match(/(\\S+@\\S+)/);\nconst sender = senderMatch ? senderMatch[1] : fromRaw;\n\nconst binaryKeys = Object.keys(emailBinary);\n\nif (binaryKeys.length > 0) {\n  // Use binary data directly (preferred)\n  for (const [key, binaryData] of Object.entries(emailBinary)) {\n    items.push({\n      json: {\n        sender,\n        subject: emailJson.subject || '',\n        date: emailJson.date || new Date().toISOString(),\n        originalFilename: binaryData.fileName || key,\n        mimeType: binaryData.mimeType || 'application/octet-stream',\n      },\n      binary: { file: binaryData },\n    });\n  }\n} else {\n  // Fallback: build binary from $json.attachments[].content (Buffer)\n  const attachments = emailJson.attachments || [];\n  for (const att of attachments) {\n    if (!att.content) continue;\n    items.push({\n      json: {\n        sender,\n        subject: emailJson.subject || '',\n        date: emailJson.date || new Date().toISOString(),\n        originalFilename: att.filename || att.name || 'attachment',\n        mimeType: att.contentType || 'application/octet-stream',\n      },\n      binary: {\n        file: {\n          data: Buffer.isBuffer(att.content) ? att.content.toString('base64') : att.content,\n          mimeType: att.contentType || 'application/octet-stream',\n          fileName: att.filename || att.name || 'attachment',\n          fileExtension: (att.filename || '').split('.').pop() || '',\n        },\n      },\n    });\n  }\n}\n\nreturn items;\n"
       },
       "id": "node-split-attachments",
       "name": "Split Attachments",
