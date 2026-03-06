@@ -1,8 +1,10 @@
 {
-  "id": "email-attachment-ingestion",
-  "name": "Email Attachment Ingestion",
-  "description": "Polls Gmail via IMAP for new emails, converts attachments via markitdown-service, saves to Obsidian vault with YAML frontmatter, indexes to RAG, and sends Telegram notification.",
+  "id": "email-ingestion",
+  "name": "Email Ingestion",
   "active": false,
+  "settings": {
+    "errorWorkflow": "error-notifier"
+  },
   "nodes": [
     {
       "parameters": {
@@ -13,101 +15,22 @@
           "allowUnauthorizedCerts": false
         }
       },
-      "id": "node-imap-trigger",
+      "id": "node-imap-email",
       "name": "IMAP Email",
       "type": "n8n-nodes-base.emailReadImap",
       "typeVersion": 2,
-      "position": [
-        -400,
-        0
-      ],
+      "position": [-400, 0],
       "credentials": {}
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose"
-          },
-          "conditions": [
-            {
-              "id": "cond-has-attachments",
-              "leftValue": "={{ ($json.attachments || []).length + Object.keys($binary || {}).filter(k => k.startsWith('attachment')).length }}",
-              "rightValue": 0,
-              "operator": {
-                "type": "number",
-                "operation": "gt"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
+        "jsCode": "// ── helpers ────────────────────────────────────────────────────────────────\nfunction stripHtml(html) {\n  if (!html) return '';\n  return html\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"').replace(/\\s+/g, ' ').trim();\n}\n\n// ── email metadata ─────────────────────────────────────────────────────────\nconst rawFrom = $json.from || '';\nconst nameMatch = rawFrom.match(/^\"?([^\"<]+)\"?\\s*</);\nconst senderName = nameMatch ? nameMatch[1].trim() : rawFrom.replace(/<[^>]+>/g, '').trim() || 'Unknown';\nconst subject = ($json.subject || 'No Subject').trim();\n\nconst d = new Date($json.date || Date.now());\nconst pad = n => String(n).padStart(2, '0');\nconst sentFm = `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} ${pad(d.getHours())}.${pad(d.getMinutes())}.${pad(d.getSeconds())}`;\nconst datePrefix = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}-${pad(d.getMinutes())}`;\n\nconst bodyText = ($json.text || stripHtml($json.html || '')).trim();\n\n// ── Ollama key-points summary ──────────────────────────────────────────────\nlet keyPoints = '';\nif (bodyText) {\n  try {\n    const ollamaResp = await $helpers.httpRequest({\n      method: 'POST',\n      url: 'http://host.docker.internal:11434/api/generate',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({\n        model: 'qwen3.5:27b',\n        prompt: `Extract the key points from this email as a concise bullet list (max 7 bullets).\\n\\n${bodyText}`,\n        system: 'Extract key information from emails. Output ONLY a markdown bullet list. No preamble, no explanation.',\n        stream: false,\n        think: false,\n        options: { num_ctx: 32768 },\n      }),\n    });\n    keyPoints = (ollamaResp.response || '').trim();\n  } catch(e) {\n    keyPoints = `*Summary unavailable: ${e.message}*`;\n  }\n}\n\n// ── attachments ────────────────────────────────────────────────────────────\nconst binaryData = $binary || {};\nconst attachmentKeys = Object.keys(binaryData).filter(k => k.startsWith('attachment'));\nconst attachmentSections = [];\n\nfor (const key of attachmentKeys) {\n  const att = binaryData[key];\n  const filename = att.fileName || att.filename || key;\n  const mediabankPath = `Mediabank/${filename}`;\n\n  // Save original to Mediabank\n  try {\n    await $helpers.httpRequest({\n      method: 'POST',\n      url: 'http://host.docker.internal:8090/api/upload_base64',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({\n        data: att.data,\n        filename: filename,\n        dest_path: mediabankPath,\n      }),\n    });\n  } catch(e) {\n    // non-fatal — continue\n  }\n\n  // Convert to markdown\n  let attMarkdown = '';\n  try {\n    const convResp = await $helpers.httpRequest({\n      method: 'POST',\n      url: 'http://host.docker.internal:8800/convert-base64',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({\n        data: att.data,\n        filename: filename,\n        content_type: att.mimeType || 'application/octet-stream',\n      }),\n    });\n    attMarkdown = (convResp.markdown || '').trim();\n  } catch(e) {\n    attMarkdown = `*Conversion failed: ${e.message}*`;\n  }\n\n  attachmentSections.push(`\\n\\n---\\n\\n## Attachment: ${filename}\\n\\n![[${mediabankPath}]]\\n\\n${attMarkdown}`);\n}\n\n// ── assemble note ──────────────────────────────────────────────────────────\nconst safeSubject = subject.replace(/[\\/\\\\:*?\"<>|]/g, '-').substring(0, 80).trim();\nconst noteName = `${datePrefix} ${safeSubject}`;\nconst notePath = `553 - emails/${noteName}.md`;\n\nconst fm = ['---', `subject: ${subject}`, `from: ${senderName}`, `sent: ${sentFm}`, '---'].join('\\n');\nconst keySection  = keyPoints  ? `\\n\\n### Key Points\\n\\n${keyPoints}`   : '';\nconst bodySection = bodyText   ? `\\n\\n### Full Email\\n\\n${bodyText}`     : '';\nconst attSection  = attachmentSections.join('');\n\nconst content = `${fm}\\n\\nSend by [[${senderName}]]${keySection}${bodySection}${attSection}`;\n\nconst indexText = [keyPoints, bodyText].filter(Boolean).join(' ') || subject;\nconst telegramLines = [`Email saved: <b>${noteName}</b>`, `From: ${senderName}`];\nif (attachmentKeys.length > 0) telegramLines.push(`Attachments: ${attachmentKeys.length}`);\ntelegramLines.push(`Folder: 553 - emails`);\n\nreturn [{\n  json: {\n    noteBody:     JSON.stringify({ path: notePath, content, overwrite: true }),\n    indexBody:    JSON.stringify({ id: notePath, text: indexText, collection: 'vault', metadata: { source: notePath, type: 'email' } }),\n    telegramText: telegramLines.join('\\n'),\n    noteName,\n  }\n}];"
       },
-      "id": "node-if-attachments",
-      "name": "Has Attachments?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        -192,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Split one email into N items, one per attachment.\n// Prefers $binary (n8n native binary), falls back to $json.attachments metadata.\nconst items = [];\nconst emailJson = $input.first().json;\nconst emailBinary = $input.first().binary || {};\n\nconst fromRaw = emailJson.from || '';\nconst senderMatch = fromRaw.match(/<([^>]+)>/) || fromRaw.match(/(\\S+@\\S+)/);\nconst sender = senderMatch ? senderMatch[1] : fromRaw;\n\nconst binaryKeys = Object.keys(emailBinary);\n\nif (binaryKeys.length > 0) {\n  // Use binary data directly (preferred)\n  for (const [key, binaryData] of Object.entries(emailBinary)) {\n    items.push({\n      json: {\n        sender,\n        subject: emailJson.subject || '',\n        date: emailJson.date || new Date().toISOString(),\n        originalFilename: binaryData.fileName || key,\n        mimeType: binaryData.mimeType || 'application/octet-stream',\n      },\n      binary: { file: binaryData },\n    });\n  }\n} else {\n  // Fallback: build binary from $json.attachments[].content (Buffer)\n  const attachments = emailJson.attachments || [];\n  for (const att of attachments) {\n    if (!att.content) continue;\n    items.push({\n      json: {\n        sender,\n        subject: emailJson.subject || '',\n        date: emailJson.date || new Date().toISOString(),\n        originalFilename: att.filename || att.name || 'attachment',\n        mimeType: att.contentType || 'application/octet-stream',\n      },\n      binary: {\n        file: {\n          data: Buffer.isBuffer(att.content) ? att.content.toString('base64') : att.content,\n          mimeType: att.contentType || 'application/octet-stream',\n          fileName: att.filename || att.name || 'attachment',\n          fileExtension: (att.filename || '').split('.').pop() || '',\n        },\n      },\n    });\n  }\n}\n\nreturn items;\n"
-      },
-      "id": "node-split-attachments",
-      "name": "Split Attachments",
+      "id": "node-assemble",
+      "name": "Assemble Full Note",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        0,
-        -112
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://host.docker.internal:8800/convert",
-        "sendBody": true,
-        "contentType": "multipart-form-data",
-        "bodyParameters": {
-          "parameters": [
-            {
-              "parameterType": "formBinaryData",
-              "name": "file",
-              "inputDataFieldName": "file"
-            }
-          ]
-        },
-        "options": {
-          "timeout": 360000
-        }
-      },
-      "id": "node-post-convert",
-      "name": "POST /convert",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        192,
-        -112
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Build YAML frontmatter + note body.\n// Note name: YYYY-MM-DD + markitdown title (fallback: filename → subject)\nconst conv = $input.first().json;  // { markdown, title, filename, source_type }\nconst email = $('Split Attachments').first().json;\n\n// Date from email (ISO string)\nconst d = new Date(email.date);\nconst dateStr = isNaN(d.getTime())\n  ? new Date().toISOString().split('T')[0]\n  : d.toISOString().split('T')[0];\n\n// Title fallback chain: markitdown title → filename stem → email subject → 'untitled'\nconst rawTitle = (conv.title || '').trim()\n  || (email.originalFilename || '').replace(/\\.[^.]+$/, '').trim()\n  || (email.subject || '').trim()\n  || 'untitled';\nconst safeTitle = rawTitle.replace(/[\\/\\\\:*?\"<>|]/g, '-').substring(0, 100).trim();\nconst noteName = `${dateStr} ${safeTitle}`;\nconst path = `002 - incoming/${noteName}.md`;\n\n// YAML frontmatter\nconst subjectSafe = (email.subject || '').replace(/\"/g, \"'\");\nconst fm = [\n  '---',\n  `sender: \"${email.sender || email.from || ''}\"`,\n  `subject: \"${subjectSafe}\"`,\n  `received: ${dateStr}`,\n  `source_type: ${conv.source_type || 'document'}`,\n  '---',\n].join('\\n');\n\nconst content = `${fm}\\n\\n${conv.markdown || ''}`;\n\nreturn [{ json: {\n  body: JSON.stringify({ path, content, overwrite: true }),\n  path,\n  markdown: conv.markdown || '',\n  noteName,\n} }];\n"
-      },
-      "id": "node-build-note-body",
-      "name": "Build Note Body",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        384,
-        -112
-      ]
+      "position": [0, 0]
     },
     {
       "parameters": {
@@ -115,89 +38,13 @@
         "url": "http://host.docker.internal:8090/api/create_note",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $json.body }}",
-        "options": {}
+        "jsonBody": "={{ $json.noteBody }}"
       },
-      "id": "node-create-vault-note",
+      "id": "node-create-note",
       "name": "Create Vault Note",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        576,
-        -112
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Extract email metadata and raw body text. Handles plain-text and HTML emails.\nconst emailJson = $input.first().json;\n\nconst d = new Date(emailJson.date || new Date());\nconst dateStr = d.toISOString().split('T')[0];\nconst pad = n => n.toString().padStart(2, '0');\nconst timeStr = `${pad(d.getHours())}-${pad(d.getMinutes())}`;\nconst sentFormatted = `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} ${pad(d.getHours())}.${pad(d.getMinutes())}.${pad(d.getSeconds())}`;\n\nconst subject = (emailJson.subject || 'no-subject').trim();\nconst safeSubject = subject.replace(/[\\/\\\\:*?\"<>|]/g, '-').substring(0, 100).trim();\nconst noteName = `${dateStr} ${timeStr} ${safeSubject}`;\nconst path = `553 - emails/${noteName}.md`;\n\n// Display name → Lastname Firstname wikilink\nconst fromRaw = emailJson.from || '';\nconst displayMatch = fromRaw.match(/^([^<]+)</) || fromRaw.match(/^([^@]+)/);\nconst displayName = (displayMatch ? displayMatch[1] : fromRaw).trim();\nconst nameParts = displayName.split(/\\s+/).filter(Boolean);\nconst wikiName = nameParts.length >= 2\n  ? `${nameParts[nameParts.length - 1]} ${nameParts.slice(0, -1).join(' ')}`\n  : displayName;\n\n// Body: prefer plain text; strip HTML tags as fallback\nfunction stripHtml(html) {\n  return html\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<br\\s*\\/?>/gi, '\\n')\n    .replace(/<\\/p>/gi, '\\n\\n')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"')\n    .replace(/[ \\t]{2,}/g, ' ')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\nconst rawBody = emailJson.text\n  ? emailJson.text.trim()\n  : emailJson.html ? stripHtml(emailJson.html) : '';\n\nreturn [{ json: { subject, wikiName, sentFormatted, dateStr, timeStr, noteName, path, rawBody } }];\n"
-      },
-      "id": "node-build-email-body",
-      "name": "Build Email Body",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        0,
-        112
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const email = $input.first().json;\nconst system = 'You are a concise executive assistant. Extract the key points from this email as 3-5 bullet points. Be specific: include names, numbers, dates, decisions, and action items where present. Output ONLY the bullet points starting with \"- \". No preamble, no headings.';\nconst prompt = `Subject: ${email.subject}\\nFrom: ${email.wikiName}\\nDate: ${email.sentFormatted}\\n\\n${email.rawBody}`;\nreturn [{ json: { body: JSON.stringify({ model: 'qwen3.5:27b', stream: false, think: false, num_ctx: 32768, system, prompt }) } }];\n"
-      },
-      "id": "node-build-ollama-email",
-      "name": "Build Ollama Email Body",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        192,
-        112
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://host.docker.internal:11434/api/generate",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ $json.body }}",
-        "options": {
-          "timeout": 300000
-        }
-      },
-      "id": "node-generate-email-summary",
-      "name": "Generate Email Summary",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        384,
-        112
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Assemble final note: frontmatter + summary + full email body\nconst email = $('Build Email Body').first().json;\nconst summary = ($input.first().json.response || '').trim();\n\nconst fm = ['---', `subject: ${email.subject}`, `from: ${email.wikiName}`, `sent: ${email.sentFormatted}`, '---'].join('\\n');\nconst content = [\n  fm,\n  '',\n  `Send by [[${email.wikiName}]]`,\n  '',\n  `# ${email.subject}`,\n  '',\n  '## Key Points',\n  summary,\n  '',\n  '---',\n  '',\n  '## Full Email',\n  email.rawBody,\n].join('\\n');\n\nreturn [{ json: {\n  body: JSON.stringify({ path: email.path, content, overwrite: true }),\n  path: email.path,\n  markdown: content,\n  noteName: email.noteName,\n} }];\n"
-      },
-      "id": "node-assemble-email-note",
-      "name": "Assemble Email Note",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        576,
-        112
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Retrieve note data from whichever path ran (attachment or email body).\nlet note = null;\ntry { note = $('Assemble Email Note').first().json; } catch(e) {}\nif (!note || !note.path) { try { note = $('Build Note Body').first().json; } catch(e) {} }\nconst ragPath = (note && note.path) || '';\nconst ragText = (note && note.markdown) || '';\nreturn [{ json: { body: JSON.stringify({\n  id: ragPath,\n  text: ragText,\n  collection: 'vault',\n  metadata: { source: ragPath, type: 'document' },\n}) } }];\n"
-      },
-      "id": "node-build-rag-body",
-      "name": "Build RAG Body",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        768,
-        -112
-      ]
+      "typeVersion": 4.1,
+      "position": [400, 0]
     },
     {
       "parameters": {
@@ -205,225 +52,48 @@
         "url": "http://host.docker.internal:8500/index",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $json.body }}",
-        "options": {
-          "timeout": 30000
-        },
-        "continueOnFail": true
+        "jsonBody": "={{ $('Assemble Full Note').first().json.indexBody }}"
       },
-      "id": "node-index-rag",
+      "id": "node-rag-index",
       "name": "Index to RAG",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        960,
-        -112
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Retrieve note data from whichever path ran (attachment or email body).\nlet note = null;\ntry { note = $('Assemble Email Note').first().json; } catch(e) {}\nif (!note || !note.path) { try { note = $('Build Note Body').first().json; } catch(e) {} }\nconst noteName = (note && note.noteName) || 'unknown';\nconst notePath = (note && note.path) || '';\n// Return text and path only — chat_id and bot_token injected by HTTP node via $env\nreturn [{ json: { noteName, notePath, tgText: `Email saved:\\n<b>${noteName}</b>\\n\\n<code>${notePath}</code>` } }];\n"
-      },
-      "id": "node-build-tg-body",
-      "name": "Build Telegram Body",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1152,
-        -112
-      ]
+      "typeVersion": 4.1,
+      "position": [800, 0],
+      "continueOnFail": true
     },
     {
       "parameters": {
         "method": "POST",
         "url": "=https://api.telegram.org/bot{{ $env.PIPELINE_BOT_TOKEN }}/sendMessage",
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ $json.body }}",
-        "options": {}
-      },
-      "id": "node-send-telegram",
-      "name": "Send Telegram Notification",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1344,
-        -112
-      ],
-      "parameters": {
-        "method": "POST",
-        "url": "=https://api.telegram.org/bot{{ $env.PIPELINE_BOT_TOKEN }}/sendMessage",
-        "sendBody": true,
+        "bodyContentType": "json",
         "bodyParameters": {
           "parameters": [
-            { "name": "chat_id", "value": "={{ $env.PIPELINE_CHAT_ID }}" },
-            { "name": "text", "value": "={{ $json.tgText }}" },
+            { "name": "chat_id",    "value": "={{ $env.PIPELINE_CHAT_ID }}" },
+            { "name": "text",       "value": "={{ $('Assemble Full Note').first().json.telegramText }}" },
             { "name": "parse_mode", "value": "HTML" }
           ]
-        },
-        "options": {}
-      }
+        }
+      },
+      "id": "node-telegram",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1200, 0]
     }
   ],
   "connections": {
     "IMAP Email": {
-      "main": [
-        [
-          {
-            "node": "Has Attachments?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Assemble Full Note", "type": "main", "index": 0 }]]
     },
-    "Has Attachments?": {
-      "main": [
-        [
-          {
-            "node": "Split Attachments",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Build Email Body",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Email Body": {
-      "main": [
-        [
-          {
-            "node": "Build Ollama Email Body",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Ollama Email Body": {
-      "main": [
-        [
-          {
-            "node": "Generate Email Summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Generate Email Summary": {
-      "main": [
-        [
-          {
-            "node": "Assemble Email Note",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Assemble Email Note": {
-      "main": [
-        [
-          {
-            "node": "Create Vault Note",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Split Attachments": {
-      "main": [
-        [
-          {
-            "node": "POST /convert",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "POST /convert": {
-      "main": [
-        [
-          {
-            "node": "Build Note Body",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Note Body": {
-      "main": [
-        [
-          {
-            "node": "Create Vault Note",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Assemble Full Note": {
+      "main": [[{ "node": "Create Vault Note", "type": "main", "index": 0 }]]
     },
     "Create Vault Note": {
-      "main": [
-        [
-          {
-            "node": "Build RAG Body",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build RAG Body": {
-      "main": [
-        [
-          {
-            "node": "Index to RAG",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Index to RAG", "type": "main", "index": 0 }]]
     },
     "Index to RAG": {
-      "main": [
-        [
-          {
-            "node": "Build Telegram Body",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Telegram Body": {
-      "main": [
-        [
-          {
-            "node": "Send Telegram Notification",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Send Telegram", "type": "main", "index": 0 }]]
     }
-  },
-  "settings": {
-    "executionOrder": "v1",
-    "errorWorkflow": "error-notifier",
-    "binaryMode": "separate",
-    "availableInMCP": false
-  },
-  "staticData": null,
-  "meta": null,
-  "pinData": {}
+  }
 }
