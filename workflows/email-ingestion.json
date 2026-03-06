@@ -23,7 +23,12 @@
         -1000,
         0
       ],
-      "credentials": {}
+      "credentials": {
+        "imap": {
+          "id": "X2HD0W2z2rVJ6Wnv",
+          "name": "IMAP account"
+        }
+      }
     },
     {
       "parameters": {
