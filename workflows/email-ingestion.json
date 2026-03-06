@@ -67,14 +67,8 @@
         "method": "POST",
         "url": "=https://api.telegram.org/bot{{ $env.PIPELINE_BOT_TOKEN }}/sendMessage",
         "sendBody": true,
-        "bodyContentType": "json",
-        "bodyParameters": {
-          "parameters": [
-            { "name": "chat_id",    "value": "={{ $env.PIPELINE_CHAT_ID }}" },
-            { "name": "text",       "value": "={{ $('Assemble Full Note').first().json.telegramText }}" },
-            { "name": "parse_mode", "value": "HTML" }
-          ]
-        }
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.PIPELINE_CHAT_ID, text: $('Assemble Full Note').first().json.telegramText, parse_mode: 'HTML' }) }}"
       },
       "id": "node-telegram",
       "name": "Send Telegram",
