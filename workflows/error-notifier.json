@@ -18,7 +18,7 @@
       "typeVersion": 2,
       "position": [240, 0],
       "parameters": {
-        "jsCode": "const err = $input.first().json;\nconst node = err.execution && err.execution.lastNodeExecuted || 'unknown node';\nconst msg = err.execution && err.execution.error && err.execution.error.message || 'unknown error';\nconst wf = err.workflow && err.workflow.name || 'pipeline';\n\nconst text = `\u26a0\ufe0f <b>Pipeline failed</b>\\n<b>Workflow:</b> ${wf}\\n<b>Failed at:</b> <code>${node}</code>\\n<b>Error:</b> <code>${msg.substring(0, 300)}</code>`;\n\nconst botToken = $env.PIPELINE_BOT_TOKEN;\nconst chatId = $env.PIPELINE_CHAT_ID;\n\nif (!botToken || !chatId) {\n  throw new Error('PIPELINE_BOT_TOKEN or PIPELINE_CHAT_ID env vars not set');\n}\n\nreturn [{ json: {\n  url: `https://api.telegram.org/bot${botToken}/sendMessage`,\n  body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })\n} }];\n"
+        "jsCode": "const err = $input.first().json;\nconst node = (err.execution && err.execution.lastNodeExecuted) || 'unknown node';\nconst msg  = (err.execution && err.execution.error && err.execution.error.message) || 'unknown error';\nconst wf   = (err.workflow && err.workflow.name) || 'pipeline';\n\nconst text = '\u26a0\ufe0f <b>Pipeline failed</b>\\n<b>Workflow:</b> ' + wf + '\\n<b>Failed at:</b> <code>' + node + '</code>\\n<b>Error:</b> <code>' + msg.substring(0, 300) + '</code>';\n\nreturn [{ json: { text } }];"
       }
     },
     {
@@ -29,10 +29,16 @@
       "position": [480, 0],
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.url }}",
+        "url": "=https://api.telegram.org/bot{{ $env.PIPELINE_BOT_TOKEN }}/sendMessage",
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ $json.body }}",
+        "bodyContentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "chat_id",    "value": "={{ $env.PIPELINE_CHAT_ID }}" },
+            { "name": "text",       "value": "={{ $json.text }}" },
+            { "name": "parse_mode", "value": "HTML" }
+          ]
+        },
         "options": {}
       }
     }
