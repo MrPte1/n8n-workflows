@@ -1,36 +1,27 @@
 {
   "id": "email-attachment-ingestion",
   "name": "Email Attachment Ingestion",
-  "description": "Polls Gmail for new emails, converts attachments via markitdown-service, saves to Obsidian vault with YAML frontmatter, indexes to RAG, and sends Telegram notification.",
+  "description": "Polls Gmail via IMAP for new emails, converts attachments via markitdown-service, saves to Obsidian vault with YAML frontmatter, indexes to RAG, and sends Telegram notification.",
   "active": false,
   "nodes": [
     {
       "parameters": {
-        "pollTimes": {
-          "item": [
-            {
-              "mode": "everyMinute"
-            }
-          ]
-        },
-        "simple": false,
+        "mailbox": "to-vault",
+        "action": "read",
         "downloadAttachments": true,
-        "options": {}
+        "options": {
+          "allowUnauthorizedCerts": false
+        }
       },
-      "id": "node-gmail-trigger",
-      "name": "Gmail Trigger",
-      "type": "n8n-nodes-base.gmailTrigger",
-      "typeVersion": 1,
+      "id": "node-imap-trigger",
+      "name": "IMAP Email",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
       "position": [
         -400,
         0
       ],
-      "credentials": {
-        "gmailOAuth2": {
-          "id": "gmail-oauth2",
-          "name": "Gmail OAuth2"
-        }
-      }
+      "credentials": {}
     },
     {
       "parameters": {
@@ -66,7 +57,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Split one email item (with N binary props) into N items, one per attachment.\n// Each output item has a normalised binary key 'file' for the HTTP POST downstream.\nconst items = [];\nconst emailJson = $input.first().json;\nconst emailBinary = $input.first().binary || {};\n\nfor (const [key, binaryData] of Object.entries(emailBinary)) {\n  items.push({\n    json: {\n      sender: emailJson.from?.value?.[0]?.address || emailJson.from || '',\n      subject: emailJson.subject || '',\n      date: emailJson.date || new Date().toISOString(),\n      originalFilename: binaryData.fileName || key,\n      mimeType: binaryData.mimeType || 'application/octet-stream',\n    },\n    binary: { file: binaryData },\n  });\n}\n\nreturn items;\n"
+        "jsCode": "// Split one email item (with N binary props) into N items, one per attachment.\n// Each output item has a normalised binary key 'file' for the HTTP POST downstream.\n// IMAP returns from as plain string: \"Name <email@example.com>\" or just \"email@example.com\"\nconst items = [];\nconst emailJson = $input.first().json;\nconst emailBinary = $input.first().binary || {};\n\nconst fromRaw = emailJson.from || '';\nconst senderMatch = fromRaw.match(/<([^>]+)>/) || fromRaw.match(/(\\S+@\\S+)/);\nconst sender = senderMatch ? senderMatch[1] : fromRaw;\n\nfor (const [key, binaryData] of Object.entries(emailBinary)) {\n  items.push({\n    json: {\n      sender,\n      subject: emailJson.subject || '',\n      date: emailJson.date || new Date().toISOString(),\n      originalFilename: binaryData.fileName || key,\n      mimeType: binaryData.mimeType || 'application/octet-stream',\n    },\n    binary: { file: binaryData },\n  });\n}\n\nreturn items;\n"
       },
       "id": "node-split-attachments",
       "name": "Split Attachments",
@@ -203,7 +194,7 @@
     }
   ],
   "connections": {
-    "Gmail Trigger": {
+    "IMAP Email": {
       "main": [
         [
           {
