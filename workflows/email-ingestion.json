@@ -34,7 +34,7 @@
           "conditions": [
             {
               "id": "cond-has-attachments",
-              "leftValue": "={{ ($json.attachments || []).length }}",
+              "leftValue": "={{ ($json.attachments || []).length + Object.keys($binary || {}).filter(k => k.startsWith('attachment')).length }}",
               "rightValue": 0,
               "operator": {
                 "type": "number",
@@ -188,7 +188,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Retrieve note data from whichever path ran (attachment or email body).\nlet note = null;\ntry { note = $('Assemble Email Note').first().json; } catch(e) {}\nif (!note || !note.path) { try { note = $('Build Note Body').first().json; } catch(e) {} }\nconst path = (note && note.path) || '';\nconst text = (note && note.markdown) || '';\nreturn [{ json: { body: JSON.stringify({\n  id: path,\n  text: text,\n  collection: 'vault',\n  metadata: { source: path, type: 'document' },\n}) } }];\n"
+        "jsCode": "// Retrieve note data from whichever path ran (attachment or email body).\nlet note = null;\ntry { note = $('Assemble Email Note').first().json; } catch(e) {}\nif (!note || !note.path) { try { note = $('Build Note Body').first().json; } catch(e) {} }\nconst ragPath = (note && note.path) || '';\nconst ragText = (note && note.markdown) || '';\nreturn [{ json: { body: JSON.stringify({\n  id: ragPath,\n  text: ragText,\n  collection: 'vault',\n  metadata: { source: ragPath, type: 'document' },\n}) } }];\n"
       },
       "id": "node-build-rag-body",
       "name": "Build RAG Body",
@@ -222,7 +222,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Retrieve note data from whichever path ran (attachment or email body).\nlet note = null;\ntry { note = $('Assemble Email Note').first().json; } catch(e) {}\nif (!note || !note.path) { try { note = $('Build Note Body').first().json; } catch(e) {} }\nconst noteName = (note && note.noteName) || 'unknown';\nconst path = (note && note.path) || '';\nconst text = `Email saved:\\n<b>${noteName}</b>\\n\\n<code>${path}</code>`;\nreturn [{ json: { body: JSON.stringify({\n  chat_id: $env.PIPELINE_CHAT_ID,\n  text,\n  parse_mode: 'HTML',\n}) } }];\n"
+        "jsCode": "// Retrieve note data from whichever path ran (attachment or email body).\nlet note = null;\ntry { note = $('Assemble Email Note').first().json; } catch(e) {}\nif (!note || !note.path) { try { note = $('Build Note Body').first().json; } catch(e) {} }\nconst noteName = (note && note.noteName) || 'unknown';\nconst notePath = (note && note.path) || '';\n// Return text and path only — chat_id and bot_token injected by HTTP node via $env\nreturn [{ json: { noteName, notePath, tgText: `Email saved:\\n<b>${noteName}</b>\\n\\n<code>${notePath}</code>` } }];\n"
       },
       "id": "node-build-tg-body",
       "name": "Build Telegram Body",
@@ -249,7 +249,20 @@
       "position": [
         1344,
         -112
-      ]
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.PIPELINE_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "chat_id", "value": "={{ $env.PIPELINE_CHAT_ID }}" },
+            { "name": "text", "value": "={{ $json.tgText }}" },
+            { "name": "parse_mode", "value": "HTML" }
+          ]
+        },
+        "options": {}
+      }
     }
   ],
   "connections": {
