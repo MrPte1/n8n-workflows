@@ -243,7 +243,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1552,
+        3360,
         -96
       ]
     },
@@ -279,11 +279,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1950,
-        300
+        3160,
+        -96
       ],
       "parameters": {
-        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst date = webhookBody.date || '';\nconst meetingName = webhookBody.meeting_name || 'Meeting';\nconst chatId = webhookBody.chat_id;\n\nconst safeName = meetingName.replace(/[\\/\\\\:*?\"<>|]/g, '-');\nconst text = `<b>Meeting minutes saved</b>\\n<code>100 - Meeting minutes/${date} ${safeName}.md</code>\\n\\nSummary ready.`;\n\nreturn [{ json: { body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }) } }];\n"
+        "jsCode": "\nconst wb = $('Webhook').first().json.body;\nconst date = wb.date || '';\nconst meetingName = wb.meeting_name || 'Meeting';\nconst chatId = wb.chat_id;\nconst safeName = meetingName.replace(/[\\/\\\\:*?\"<>|]/g, '-');\nconst intelPath = $('Build Intel Note Body').first().json.intelPath || '101 - Meeting Intelligence Reports/...';\n\nconst text = `<b>Meeting pipeline complete</b>\\n\\n📋 <code>100 - Meeting minutes/${date} ${safeName}.md</code>\\n🔍 <code>${intelPath}</code>`;\nreturn [{ json: { body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }) } }];\n"
       }
     },
     {
@@ -297,10 +297,132 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1752,
+        3560,
         -96
       ],
       "continueOnFail": true
+    },
+    {
+      "id": "node-get-transcript-json",
+      "name": "Get Transcript JSON",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        -96
+      ],
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/jobs/{{ $('Submit Transcription Job').item.json.job_id }}/artifacts/transcript.json",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-compute-metrics",
+      "name": "Compute Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "\nconst data = $input.first().json;\nconst segments = data.segments || [];\n\nconst speakerStats = {};\nfor (const seg of segments) {\n  const spk = seg.speaker || 'Unknown';\n  if (!speakerStats[spk]) {\n    speakerStats[spk] = { totalTime: 0, turns: 0, words: 0, longestTurn: 0, longestTurnText: '', longestTurnTs: 0 };\n  }\n  const s = speakerStats[spk];\n  const dur = seg.end - seg.start;\n  s.totalTime += dur;\n  s.turns++;\n  s.words += (seg.text || '').split(/\\s+/).filter(w => w).length;\n  if (dur > s.longestTurn) {\n    s.longestTurn = dur;\n    s.longestTurnText = (seg.text || '').substring(0, 100);\n    s.longestTurnTs = seg.start;\n  }\n}\n\nconst totalDuration = segments.length ? segments[segments.length - 1].end : 1;\n\nconst interruptions = [];\nfor (let i = 1; i < segments.length; i++) {\n  const prev = segments[i-1], curr = segments[i];\n  const gap = curr.start - prev.end;\n  if (prev.speaker !== curr.speaker && gap < 0.5 && gap > -1) {\n    interruptions.push({ by: curr.speaker, interrupted: prev.speaker, at: curr.start, context: (prev.text || '').substring(0, 60) });\n  }\n}\n\nconst longPauses = [];\nfor (let i = 1; i < segments.length; i++) {\n  const gap = segments[i].start - segments[i-1].end;\n  if (gap > 5) {\n    longPauses.push({ at: segments[i-1].end, duration: Math.round(gap), before: (segments[i-1].text || '').substring(0, 80), after: (segments[i].text || '').substring(0, 80) });\n  }\n}\n\nconst windowSize = 300;\nconst windows = {};\nfor (const seg of segments) {\n  const w = Math.floor(seg.start / windowSize);\n  windows[w] = (windows[w] || 0) + 1;\n}\nconst energyCurve = Object.entries(windows).map(([w, c]) => ({ minuteMark: parseInt(w) * 5, turns: c }));\n\nconst fmt = s => `${Math.floor(s/60)}m${Math.round(s%60)}s`;\nconst ts  = s => new Date(s * 1000).toISOString().substr(11, 5);\n\nlet metricsText = `## QUANTITATIVE METRICS\\n\\n**Total duration:** ${fmt(totalDuration)}\\n**Speakers:** ${Object.keys(speakerStats).length}\\n\\n### Talk Ratios\\n`;\nfor (const [spk, s] of Object.entries(speakerStats)) {\n  const ratio = Math.round(s.totalTime / totalDuration * 100);\n  const wpm   = s.totalTime > 0 ? Math.round(s.words / (s.totalTime / 60)) : 0;\n  metricsText += `- **${spk}**: ${ratio}% airtime (${fmt(s.totalTime)}), ${s.turns} turns, ~${wpm} WPM, longest: ${fmt(s.longestTurn)} at ${ts(s.longestTurnTs)}\\n`;\n  if (s.longestTurnText) metricsText += `  > \"${s.longestTurnText}...\"\\n`;\n}\n\nmetricsText += `\\n### Interruptions (${interruptions.length} total)\\n`;\nif (interruptions.length === 0) {\n  metricsText += `None detected.\\n`;\n} else {\n  const byPair = {};\n  for (const ir of interruptions) { const k = `${ir.by} \\u2192 ${ir.interrupted}`; byPair[k] = (byPair[k]||0)+1; }\n  for (const [pair, count] of Object.entries(byPair)) metricsText += `- ${pair}: ${count}x\\n`;\n}\n\nmetricsText += `\\n### Long Pauses >5s (${longPauses.length} total)\\n`;\nfor (const p of longPauses.slice(0, 5)) {\n  metricsText += `- ${p.duration}s at ${ts(p.at)}: \"...${p.before}\" \\u2192 \"${p.after}...\"\\n`;\n}\nif (longPauses.length === 0) metricsText += `None detected.\\n`;\n\nmetricsText += `\\n### Energy Curve (turns per 5-min window)\\n`;\nmetricsText += energyCurve.map(w => `- min ${w.minuteMark}: ${w.turns} turns`).join('\\n') + '\\n';\n\nreturn [{ json: { metrics: metricsText, speakerStats, interruptions, longPauses, energyCurve, totalDuration } }];\n"
+      }
+    },
+    {
+      "id": "node-build-rag-query",
+      "name": "Build RAG Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "\nconst wb = $('Webhook').first().json.body;\nconst participants = wb.participants || [];\nconst meetingName  = wb.meeting_name || '';\nconst query = `meeting intelligence ELITE-INTEL-OMEGA behavioral analysis ${participants.join(' ')} ${meetingName}`;\nreturn [{ json: { body: JSON.stringify({ query, n_results: 10, collection: 'vault' }) } }];\n"
+      }
+    },
+    {
+      "id": "node-fetch-historical-context",
+      "name": "Fetch Historical Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        -96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8500/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-build-intel-llm-body",
+      "name": "Build Intel LLM Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2360,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "\nconst wb           = $('Webhook').first().json.body;\nconst participants = wb.participants || [];\nconst meetingName  = wb.meeting_name || '';\nconst date         = wb.date || new Date().toISOString().split('T')[0];\nconst transcript   = $('Get Transcript').first().json.data;\nconst minutes      = $('Generate Meeting Minutes').first().json.response || '';\nconst metrics      = $('Compute Metrics').first().json.metrics;\nconst ragResults   = $('Fetch Historical Context').first().json;\nconst ragChunks    = Array.isArray(ragResults)\n    ? ragResults.map(r => r.text).join('\\n\\n---\\n\\n')\n    : '';\n\n// Wikilink pre-validation\nconst ragLower = ragChunks.toLowerCase();\nconst confirmedInVault = participants.filter(p => ragLower.includes(p.toLowerCase().split(' ')[0]));\n\nconst systemPrompt = `You are ELITE-INTEL-OMEGA, a world-class Strategic Intelligence Analyst with 20+ years in HUMINT (CIA), behavioral profiling (FBI BAU), linguistic forensics, negotiation psychology (Chris Voss Black Swan Group), and competitive/business intelligence. You have analyzed thousands of transcripts for hidden signals. Your reports have prevented multimillion-dollar mistakes and uncovered game-changing leverage.\n\nYour style: Formal yet razor-sharp. Zero fluff, maximum signal. Every inference is evidence-based (direct quote or paraphrase from transcript + exact speaker). Assign explicit confidence % (e.g., 85% \\u2013 strong linguistic + behavioral cluster). Flag speculation as \"hypothesis \\u2013 needs external validation.\" Use tactical empathy: label emotions explicitly.\n\nTASK: Analyze the diarized transcript and meeting minutes. Produce a comprehensive Meeting Intelligence Report revealing: secrets, fears, motivations, drivers, hidden agendas, power dynamics, deception cues, unspoken risks, and strategic leverage. USE the quantitative metrics as ground truth for behavioral pattern claims \\u2014 do not contradict them.\n\nWIKILINK RULES: Use [[Lastname Firstname]] ONLY for people confirmed in vault: ${confirmedInVault.join(', ') || 'none confirmed \\u2014 use [[FirstName]] for all participants'}. Never guess surnames.\n\nEXECUTION PROTOCOL (internal only, do not show reasoning):\n1. DATA INGEST: Map all persons and key items. Cross-reference quantitative metrics with linguistic patterns.\n2. LINGUISTIC FORENSICS (Hancock/Vrij/Levitan): Deception indicators, pronoun shifts, hedging clusters, emotional leakage, topic avoidance. Flag with confidence %.\n3. PSYCHOLOGICAL PROFILING (CRUCIBLE + CIA dossier): Per participant \\u2014 Motivations, Fears, Secrets, Hidden Agendas, Behavioral Patterns. Evidence-backed with confidence %.\n4. DYNAMICS: Power structures, alliances, tensions. Pre-Mortem, Inversion, After-Action mental models.\n5. LONGITUDINAL: Compare against historical context provided. Note behavioral changes, escalations, anomalies vs. prior meetings.\n6. OBSIDIAN INTEGRATION: Suggest wikilinks and atomic notes.\n\nOUTPUT FORMAT (strict Markdown):\n# MEETING INTELLIGENCE REPORT\n**Meeting**: [Title/Date]\n**Analyst**: ELITE-INTEL-OMEGA\n**Confidence Baseline**: XX%\n**Date**: [Today's date]\n\n## 1. Executive Summary\n(3-5 bullets: highest-signal insights only)\n\n## 2. Participant Intelligence Profiles\n(One subsection per person. Include: Role | Core Drivers + evidence | Key Fears labeled + % | Behavioral Shifts this meeting | Leverage Points)\n\n## 3. Linguistic & Behavioral Forensics\n- Deception/Withholding Clusters (quote + speaker + %)\n- Emotional Tone Map\n- Communication Patterns (reference quantitative metrics directly by number)\n\n## 4. Secrets, Fears, Motivations & Hidden Agendas\n\n## 5. Relationship & Power Dynamics\n- Alliances/Tensions Map\n- Strategic Leverage Opportunities\n\n## 6. Actionable Recommendations & Next Steps\n- Immediate (tactical)\n- Strategic (long-term)\n- Monitoring Signals to Watch in Future Meetings\n\n## 7. Longitudinal Delta (vs. previous meetings)\n- Behavioral changes per participant since last encounter\n- Escalating/de-escalating signals\n- Pattern confirmation or anomaly flags\n(If no historical context available: \"First encounter \\u2014 baseline established.\")\n\n## 8. Obsidian PKMS Integration\n- New/Recommended Wikilinks & Atomic Notes (ready to copy-paste)\n- Suggested MOC updates\n\n## Appendix: Raw Evidence Log\n(Quoted excerpts grouped by insight \\u2014 for audit trail)\n\nBe ruthless in honesty, constructive in recommendations. Begin analysis now.`;\n\nconst userMsg = `**Meeting:** ${meetingName}\n**Date:** ${date}\n**Participants:** ${participants.join(', ')}\n\n${metrics}\n\n---\n\n## MEETING MINUTES (processed)\n${minutes}\n\n---\n\n## RAW DIARIZED TRANSCRIPT\n${transcript}\n\n---\n\n## HISTORICAL CONTEXT (vault excerpts \\u2014 previous intel reports & people notes)\n${ragChunks || 'No historical context found for these participants.'}`;\n\nreturn [{ json: { body: JSON.stringify({\n    model: 'qwen3.5:27b',\n    stream: false,\n    think: false,\n    num_ctx: 65536,\n    system: systemPrompt,\n    prompt: userMsg\n}) } }];\n"
+      }
+    },
+    {
+      "id": "node-generate-intel-report",
+      "name": "Generate Intel Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2560,
+        -96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 600000
+        }
+      }
+    },
+    {
+      "id": "node-build-intel-note-body",
+      "name": "Build Intel Note Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2760,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "\nconst wb          = $('Webhook').first().json.body;\nconst date        = wb.date || new Date().toISOString().split('T')[0];\nconst meetingName = wb.meeting_name || 'Meeting';\nconst resp        = $input.first().json;\nconst report      = resp.response || '';\nif (!report) throw new Error('No intel report from LLM: ' + JSON.stringify(resp).substring(0, 200));\n\nconst now = new Date();\nconst createdAt = now.toLocaleString('fi-FI', {\n  timeZone: 'Europe/Helsinki', year: 'numeric', month: '2-digit', day: '2-digit',\n  hour: '2-digit', minute: '2-digit'\n}).replace(',', '');\n\nconst safeName = meetingName.replace(/[\\/\\\\:*?\"<>|]/g, '-');\nconst path     = `101 - Meeting Intelligence Reports/${date} ${safeName}.md`;\nconst header   = `Intel report generated: ${createdAt}\\nClassification: PERSONAL \\u2014 RESTRICTED\\nTemplate Version: M15.1\\n\\n---\\n\\n`;\n\nreturn [{ json: { body: JSON.stringify({ path, content: header + report, overwrite: true }), intelPath: path } }];\n"
+      }
+    },
+    {
+      "id": "node-create-intel-note",
+      "name": "Create Intel Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2960,
+        -96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8090/api/create_note",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      }
     }
   ],
   "connections": {
@@ -419,7 +541,7 @@
       "main": [
         [
           {
-            "node": "Build Telegram Body",
+            "node": "Get Transcript JSON",
             "type": "main",
             "index": 0
           }
@@ -469,6 +591,94 @@
           }
         ]
       ]
+    },
+    "Get Transcript JSON": {
+      "main": [
+        [
+          {
+            "node": "Compute Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Metrics": {
+      "main": [
+        [
+          {
+            "node": "Build RAG Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build RAG Query": {
+      "main": [
+        [
+          {
+            "node": "Fetch Historical Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Historical Context": {
+      "main": [
+        [
+          {
+            "node": "Build Intel LLM Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Intel LLM Body": {
+      "main": [
+        [
+          {
+            "node": "Generate Intel Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Intel Report": {
+      "main": [
+        [
+          {
+            "node": "Build Intel Note Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Intel Note Body": {
+      "main": [
+        [
+          {
+            "node": "Create Intel Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Intel Note": {
+      "main": [
+        [
+          {
+            "node": "Build Telegram Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -482,7 +692,7 @@
   "pinData": {},
   "versionId": "fdc19e37-b077-4bd9-8b98-ea10693bca44",
   "activeVersionId": "fdc19e37-b077-4bd9-8b98-ea10693bca44",
-  "versionCounter": 4,
+  "versionCounter": 5,
   "triggerCount": 1,
   "tags": [
     {
