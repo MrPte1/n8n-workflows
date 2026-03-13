@@ -525,7 +525,8 @@
         "jsonBody": "={{ JSON.stringify({ path: \"035 - AI server/Pending Actions.md\", content: $json.appendContent }) }}",
         "options": {
           "timeout": 10000
-        }
+        },
+        "sendBody": true
       }
     }
   ],
