@@ -500,6 +500,7 @@
       "id": "node-parse-action-items",
       "name": "Parse Action Items",
       "type": "n8n-nodes-base.code",
+      "disabled": true,
       "typeVersion": 2,
       "position": [
         4000,
@@ -513,6 +514,7 @@
       "id": "node-append-pending-actions",
       "name": "Append Pending Actions",
       "type": "n8n-nodes-base.httpRequest",
+      "disabled": true,
       "typeVersion": 4.2,
       "position": [
         4240,
