@@ -146,7 +146,7 @@
         "url": "http://host.docker.internal:11434/api/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'qwen3.5:27b', prompt: 'Extract the key points from this email as a concise bullet list (max 7 bullets).\\n\\n' + $json.bodyText, system: 'Extract key information from emails. Output ONLY a markdown bullet list. No preamble.', stream: false, think: false, options: { num_ctx: 32768 } }) }}",
+        "jsonBody": "={{ JSON.stringify({ model: 'glm-4.7-flash:32k', prompt: 'Extract the key points from this email as a concise bullet list (max 7 bullets).\\n\\n' + $json.bodyText, system: 'Extract key information from emails. Output ONLY a markdown bullet list. No preamble.', stream: false, think: false, options: { num_ctx: 32768 } }) }}",
         "options": {}
       },
       "id": "node-ollama",

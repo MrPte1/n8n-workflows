@@ -58,7 +58,7 @@
       "typeVersion": 2,
       "position": [720, -80],
       "parameters": {
-        "jsCode": "const date = $json.date;\nconst content = $json.content;\n\nconst prompt = `You are summarizing a day of conversations between a user and their AI assistant Trace.\n\nDATE: ${date}\n\nCHAT LOG:\n${content}\n\n---\n\nWrite a concise summary of this day's conversations. Include:\n- Main topics discussed\n- Key decisions or actions taken\n- Important notes or insights\n- Any follow-up items mentioned\n\nKeep it under 400 words. Use plain text, no markdown headers.`;\n\nreturn [{\n  json: {\n    date,\n    content,\n    logPath: $json.logPath,\n    body: JSON.stringify({\n      model: 'qwen3.5:27b-32k',\n      prompt,\n      stream: false,\n      options: { num_ctx: 8192 },\n      think: false\n    })\n  }\n}];"
+        "jsCode": "const date = $json.date;\nconst content = $json.content;\n\nconst prompt = `You are summarizing a day of conversations between a user and their AI assistant Trace.\n\nDATE: ${date}\n\nCHAT LOG:\n${content}\n\n---\n\nWrite a concise summary of this day's conversations. Include:\n- Main topics discussed\n- Key decisions or actions taken\n- Important notes or insights\n- Any follow-up items mentioned\n\nKeep it under 400 words. Use plain text, no markdown headers.`;\n\nreturn [{\n  json: {\n    date,\n    content,\n    logPath: $json.logPath,\n    body: JSON.stringify({\n      model: 'glm-4.7-flash:32k-32k',\n      prompt,\n      stream: false,\n      options: { num_ctx: 8192 },\n      think: false\n    })\n  }\n}];"
       }
     },
     {
