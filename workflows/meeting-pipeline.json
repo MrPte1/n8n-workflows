@@ -497,6 +497,27 @@
       "continueOnFail": true
     },
     {
+      "id": "node-warmup-ollama",
+      "name": "Warmup Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        32
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"model\":\"qwen3.5:27b\",\"prompt\":\"hi\",\"stream\":false,\"think\":false,\"num_predict\":1}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
       "id": "node-parse-action-items",
       "name": "Parse Action Items",
       "type": "n8n-nodes-base.code",
@@ -623,6 +644,17 @@
       ]
     },
     "Get Transcript": {
+      "main": [
+        [
+          {
+            "node": "Warmup Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Warmup Ollama": {
       "main": [
         [
           {
