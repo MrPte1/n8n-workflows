@@ -588,7 +588,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst item = $input.item.json;\nconst body = item.body;\n\n// Call Ollama\nconst resp = await fetch('http://host.docker.internal:11434/api/generate', {\n    method: 'POST',\n    headers: {'Content-Type': 'application/json'},\n    body: body,\n    signal: AbortSignal.timeout(300000),\n});\nconst result = await resp.json();\n\nreturn {\n    json: {\n        response: result.response || '',\n        topicIndex: item.topicIndex,\n        topicName: item.topicName,\n        totalTopics: item.totalTopics,\n    }\n};\n"
+        "jsCode": "const item = $input.item.json;\nconst bodyObj = JSON.parse(item.body);\n\n// Call Ollama via n8n built-in HTTP helper\nconst result = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://host.docker.internal:11434/api/generate',\n    body: bodyObj,\n    headers: {'Content-Type': 'application/json'},\n    timeout: 300000,\n    returnFullResponse: false,\n    json: true,\n});\n\nreturn {\n    json: {\n        response: result.response || '',\n        topicIndex: item.topicIndex,\n        topicName: item.topicName,\n        totalTopics: item.totalTopics,\n    }\n};"
       }
     },
     {
