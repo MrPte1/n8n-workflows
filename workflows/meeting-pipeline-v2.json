@@ -1,0 +1,1070 @@
+{
+  "id": "meeting-pipeline-v2",
+  "name": "Meeting Audio Pipeline v2",
+  "description": "Divide-and-conquer meeting pipeline (M59). Same interface as v1. Only one should be active.",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meeting-audio",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c4c621aa-29ac-4304-80da-91ea119c33fa",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        -96
+      ],
+      "webhookId": "meeting-audio"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "validate-file-id",
+              "leftValue": "={{ $json.body.file_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            },
+            {
+              "id": "validate-bot-token",
+              "leftValue": "={{ $json.body.bot_token }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-validate-input",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -48,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Pipeline started",
+        "options": {}
+      },
+      "id": "03d01032-b6ce-449c-97ef-980a123db747",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        160,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=Missing required fields: file_id and bot_token",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "node-reject-invalid",
+      "name": "Reject Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        160,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/bot{{ $json.body.bot_token }}/getFile?file_id={{ $json.body.file_id }}",
+        "options": {}
+      },
+      "id": "26ddb4a7-43a7-44f3-8f8f-274e3f661891",
+      "name": "Get File Path",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -48,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/file/bot{{ $('Webhook').item.json.body.bot_token }}/{{ $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "59ad3f4a-97c4-4d2f-8062-662af55b3633",
+      "name": "Download Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        160,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/jobs",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "diarize",
+              "value": "true"
+            },
+            {
+              "name": "language_hint",
+              "value": "fi"
+            },
+            {
+              "name": "participants",
+              "value": "={{ $('Webhook').item.json.body.participants && $('Webhook').item.json.body.participants.length ? JSON.stringify($('Webhook').item.json.body.participants) : '[]' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6b0fb9b5-ba8e-45bd-a1c6-3f9968ea4d6d",
+      "name": "Submit Transcription Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        352,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/jobs/{{ $('Submit Transcription Job').item.json.job_id }}",
+        "options": {}
+      },
+      "id": "313a469f-f24b-4b1e-91a9-02beee04af9d",
+      "name": "Poll Job Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-done",
+              "leftValue": "={{ $json.status.status }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b80c49c3-3051-42c2-b091-bd762cbc8cc3",
+      "name": "Check Status",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        752,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 15
+      },
+      "id": "b01f30e5-aeb5-41bf-ac8e-2d9502f33b56",
+      "name": "Wait 15s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        560,
+        224
+      ],
+      "webhookId": "4da3c382-b085-45c0-9cf6-7502b0974ddf"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/jobs/{{ $('Submit Transcription Job').item.json.job_id }}/artifacts/transcript.txt",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "67b1fc54-b48e-4480-a210-e1d0594795ee",
+      "name": "Get Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        -96
+      ]
+    },
+    {
+      "id": "node-warmup-ollama",
+      "name": "Warmup Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        32
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"model\":\"qwen3.5:27b-32k\",\"prompt\":\"hi\",\"stream\":false,\"think\":false,\"num_predict\":1}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8090/api/create_note",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "815b26e8-5e74-4c52-b337-d7fba2697266",
+      "name": "Create Vault Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        -96
+      ]
+    },
+    {
+      "id": "node-get-transcript-json",
+      "name": "Get Transcript JSON",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        -96
+      ],
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/jobs/{{ $('Submit Transcription Job').item.json.job_id }}/artifacts/transcript.json",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-compute-metrics",
+      "name": "Compute Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "\nconst data = $input.first().json;\nconst segments = data.segments || [];\n\nconst speakerStats = {};\nfor (const seg of segments) {\n  const spk = seg.speaker || 'Unknown';\n  if (!speakerStats[spk]) {\n    speakerStats[spk] = { totalTime: 0, turns: 0, words: 0, longestTurn: 0, longestTurnText: '', longestTurnTs: 0 };\n  }\n  const s = speakerStats[spk];\n  const dur = seg.end - seg.start;\n  s.totalTime += dur;\n  s.turns++;\n  s.words += (seg.text || '').split(/\\s+/).filter(w => w).length;\n  if (dur > s.longestTurn) {\n    s.longestTurn = dur;\n    s.longestTurnText = (seg.text || '').substring(0, 100);\n    s.longestTurnTs = seg.start;\n  }\n}\n\nconst totalDuration = segments.length ? segments[segments.length - 1].end : 1;\n\nconst interruptions = [];\nfor (let i = 1; i < segments.length; i++) {\n  const prev = segments[i-1], curr = segments[i];\n  const gap = curr.start - prev.end;\n  if (prev.speaker !== curr.speaker && gap < 0.5 && gap > -1) {\n    interruptions.push({ by: curr.speaker, interrupted: prev.speaker, at: curr.start, context: (prev.text || '').substring(0, 60) });\n  }\n}\n\nconst longPauses = [];\nfor (let i = 1; i < segments.length; i++) {\n  const gap = segments[i].start - segments[i-1].end;\n  if (gap > 5) {\n    longPauses.push({ at: segments[i-1].end, duration: Math.round(gap), before: (segments[i-1].text || '').substring(0, 80), after: (segments[i].text || '').substring(0, 80) });\n  }\n}\n\nconst windowSize = 300;\nconst windows = {};\nfor (const seg of segments) {\n  const w = Math.floor(seg.start / windowSize);\n  windows[w] = (windows[w] || 0) + 1;\n}\nconst energyCurve = Object.entries(windows).map(([w, c]) => ({ minuteMark: parseInt(w) * 5, turns: c }));\n\nconst fmt = s => `${Math.floor(s/60)}m${Math.round(s%60)}s`;\nconst ts  = s => new Date(s * 1000).toISOString().substr(11, 5);\n\nlet metricsText = `## QUANTITATIVE METRICS\\n\\n**Total duration:** ${fmt(totalDuration)}\\n**Speakers:** ${Object.keys(speakerStats).length}\\n\\n### Talk Ratios\\n`;\nfor (const [spk, s] of Object.entries(speakerStats)) {\n  const ratio = Math.round(s.totalTime / totalDuration * 100);\n  const wpm   = s.totalTime > 0 ? Math.round(s.words / (s.totalTime / 60)) : 0;\n  metricsText += `- **${spk}**: ${ratio}% airtime (${fmt(s.totalTime)}), ${s.turns} turns, ~${wpm} WPM, longest: ${fmt(s.longestTurn)} at ${ts(s.longestTurnTs)}\\n`;\n  if (s.longestTurnText) metricsText += `  > \"${s.longestTurnText}...\"\\n`;\n}\n\nmetricsText += `\\n### Interruptions (${interruptions.length} total)\\n`;\nif (interruptions.length === 0) {\n  metricsText += `None detected.\\n`;\n} else {\n  const byPair = {};\n  for (const ir of interruptions) { const k = `${ir.by} \\u2192 ${ir.interrupted}`; byPair[k] = (byPair[k]||0)+1; }\n  for (const [pair, count] of Object.entries(byPair)) metricsText += `- ${pair}: ${count}x\\n`;\n}\n\nmetricsText += `\\n### Long Pauses >5s (${longPauses.length} total)\\n`;\nfor (const p of longPauses.slice(0, 5)) {\n  metricsText += `- ${p.duration}s at ${ts(p.at)}: \"...${p.before}\" \\u2192 \"${p.after}...\"\\n`;\n}\nif (longPauses.length === 0) metricsText += `None detected.\\n`;\n\nmetricsText += `\\n### Energy Curve (turns per 5-min window)\\n`;\nmetricsText += energyCurve.map(w => `- min ${w.minuteMark}: ${w.turns} turns`).join('\\n') + '\\n';\n\nreturn [{ json: { metrics: metricsText, speakerStats, interruptions, longPauses, energyCurve, totalDuration } }];\n"
+      }
+    },
+    {
+      "id": "node-build-rag-query",
+      "name": "Build RAG Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "\nconst wb = $('Webhook').first().json.body;\nconst participants = wb.participants || [];\nconst meetingName  = wb.meeting_name || '';\nconst query = `meeting intelligence ELITE-INTEL-OMEGA behavioral analysis ${participants.join(' ')} ${meetingName}`;\nreturn [{ json: { body: JSON.stringify({ query, n_results: 10, collection: 'vault' }) } }];\n"
+      }
+    },
+    {
+      "id": "node-fetch-historical-context",
+      "name": "Fetch Historical Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        -96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8500/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-build-intel-llm-body",
+      "name": "Build Intel LLM Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2360,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "\nconst wb           = $('Webhook').first().json.body;\nconst participants = wb.participants || [];\nconst meetingName  = wb.meeting_name || '';\nconst date         = wb.date || new Date().toISOString().split('T')[0];\nconst transcript   = $('Get Transcript').first().json.data;\nconst minutes      = $('Generate Meeting Minutes').first().json.response || '';\nconst metrics      = $('Compute Metrics').first().json.metrics;\nconst ragResults   = $('Fetch Historical Context').first().json;\nconst ragChunks    = Array.isArray(ragResults)\n    ? ragResults.map(r => r.text).join('\\n\\n---\\n\\n')\n    : '';\n\n// Wikilink pre-validation\nconst ragLower = ragChunks.toLowerCase();\nconst confirmedInVault = participants.filter(p => ragLower.includes(p.toLowerCase().split(' ')[0]));\n\nconst systemPrompt = `You are ELITE-INTEL-OMEGA, a world-class Strategic Intelligence Analyst with 20+ years in HUMINT (CIA), behavioral profiling (FBI BAU), linguistic forensics, negotiation psychology (Chris Voss Black Swan Group), and competitive/business intelligence. You have analyzed thousands of transcripts for hidden signals. Your reports have prevented multimillion-dollar mistakes and uncovered game-changing leverage.\n\nYour style: Formal yet razor-sharp. Zero fluff, maximum signal. Every inference is evidence-based (direct quote or paraphrase from transcript + exact speaker). Assign explicit confidence % (e.g., 85% \\u2013 strong linguistic + behavioral cluster). Flag speculation as \"hypothesis \\u2013 needs external validation.\" Use tactical empathy: label emotions explicitly.\n\nTASK: Analyze the diarized transcript and meeting minutes. Produce a comprehensive Meeting Intelligence Report revealing: secrets, fears, motivations, drivers, hidden agendas, power dynamics, deception cues, unspoken risks, and strategic leverage. USE the quantitative metrics as ground truth for behavioral pattern claims \\u2014 do not contradict them.\n\nWIKILINK RULES: ALL person mentions throughout the report (including Section 8) MUST be wikilinks. Format: [[Lastname Firstname]] if both names are known; [[Firstname]] if only first name known. Never write plain text for person names. Never guess surnames. People confirmed in vault: ${confirmedInVault.join(', ') || 'none confirmed yet \\u2014 use [[Firstname]] for all participants'}.\n\nEXECUTION PROTOCOL (internal only, do not show reasoning):\n1. DATA INGEST: Map all persons and key items. Cross-reference quantitative metrics with linguistic patterns.\n2. LINGUISTIC FORENSICS (Hancock/Vrij/Levitan): Deception indicators, pronoun shifts, hedging clusters, emotional leakage, topic avoidance. Flag with confidence %.\n3. PSYCHOLOGICAL PROFILING (CRUCIBLE + CIA dossier): Per participant \\u2014 Motivations, Fears, Secrets, Hidden Agendas, Behavioral Patterns. Evidence-backed with confidence %.\n4. DYNAMICS: Power structures, alliances, tensions. Pre-Mortem, Inversion, After-Action mental models.\n5. LONGITUDINAL: Compare against historical context provided. Note behavioral changes, escalations, anomalies vs. prior meetings.\n6. OBSIDIAN INTEGRATION: Suggest wikilinks and atomic notes.\n\nOUTPUT FORMAT (strict Markdown):\n# MEETING INTELLIGENCE REPORT\n**Meeting**: [Title/Date]\n**Analyst**: ELITE-INTEL-OMEGA\n**Confidence Baseline**: XX%\n**Date**: [Today's date]\n\n## 1. Executive Summary\n(3-5 bullets: highest-signal insights only)\n\n## 2. Participant Intelligence Profiles\n(One subsection per person. Include: Role | Core Drivers + evidence | Key Fears labeled + % | Behavioral Shifts this meeting | Leverage Points)\n\n## 3. Linguistic & Behavioral Forensics\n- Deception/Withholding Clusters (quote + speaker + %)\n- Emotional Tone Map\n- Communication Patterns (reference quantitative metrics directly by number)\n\n## 4. Secrets, Fears, Motivations & Hidden Agendas\n\n## 5. Relationship & Power Dynamics\n- Alliances/Tensions Map\n- Strategic Leverage Opportunities\n\n## 6. Actionable Recommendations & Next Steps\n- Immediate (tactical)\n- Strategic (long-term)\n- Monitoring Signals to Watch in Future Meetings\n\n## 7. Longitudinal Delta (vs. previous meetings)\n- Behavioral changes per participant since last encounter\n- Escalating/de-escalating signals\n- Pattern confirmation or anomaly flags\n(If no historical context available: \"First encounter \\u2014 baseline established.\")\n\n## 8. Obsidian PKMS Integration\n- New/Recommended Wikilinks & Atomic Notes (ready to copy-paste). All people as [[Lastname Firstname]] or [[Firstname]] — never plain text.\n- Suggested MOC updates\n\n## Appendix: Raw Evidence Log\n(Quoted excerpts grouped by insight \\u2014 for audit trail)\n\nBe ruthless in honesty, constructive in recommendations. Begin analysis now.`;\n\nconst userMsg = `**Meeting:** ${meetingName}\n**Date:** ${date}\n**Participants:** ${participants.join(', ')}\n\n${metrics}\n\n---\n\n## MEETING MINUTES (processed)\n${minutes}\n\n---\n\n## RAW DIARIZED TRANSCRIPT\n${transcript}\n\n---\n\n## HISTORICAL CONTEXT (vault excerpts \\u2014 previous intel reports & people notes)\n${ragChunks || 'No historical context found for these participants.'}`;\n\nreturn [{ json: { body: JSON.stringify({\n    model: 'qwen3.5:27b-32k',\n    stream: false,\n    think: false,\n    num_ctx: 32768,\n    system: systemPrompt,\n    prompt: userMsg\n}) } }];\n"
+      }
+    },
+    {
+      "id": "node-generate-intel-report",
+      "name": "Generate Intel Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2560,
+        -96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-build-intel-note-body",
+      "name": "Build Intel Note Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2760,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "\nconst wb          = $('Webhook').first().json.body;\nconst date        = wb.date || new Date().toISOString().split('T')[0];\nconst meetingName = wb.meeting_name || 'Meeting';\nconst resp        = $input.first().json;\nconst report      = resp.response || '';\nif (!report) { return [{ json: { intelPath: '101 - Meeting Intelligence Reports/(intel skipped — LLM returned empty)' } }]; }\n\nconst now = new Date();\nconst _hTime = new Date(now.toLocaleString('en-US', {timeZone: 'Europe/Helsinki'}));\nconst _pad = n => String(n).padStart(2, '0');\nconst createdAt = `${_hTime.getFullYear()}-${_pad(_hTime.getMonth()+1)}-${_pad(_hTime.getDate())} ${_pad(_hTime.getHours())}:${_pad(_hTime.getMinutes())}`;\n\nconst safeName = meetingName.replace(/[\\/\\\\:*?\"<>|]/g, '-');\nconst path       = `101 - Meeting Intelligence Reports/${date} ${safeName} - Intelligence Report.md`;\nconst minutePath = `100 - Meeting minutes/${date} ${safeName}.md`;\nconst header     = `Intel report generated: ${createdAt}\\nClassification: PERSONAL \\u2014 RESTRICTED\\nTemplate Version: M15.1\\n\\n---\\n\\n`;\nconst crossLink  = `\\n\\n---\\n\\n*Meeting Minutes: [[${minutePath}]]*`;\n\nreturn [{ json: { body: JSON.stringify({ path, content: header + report + crossLink, overwrite: true }), intelPath: path } }];\n"
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-create-intel-note",
+      "name": "Create Intel Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2960,
+        -96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8090/api/create_note",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-build-extract-llm-body",
+      "name": "Build Extract LLM Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3160,
+        100
+      ],
+      "parameters": {
+        "jsCode": "\nconst wb = $('Webhook').first().json.body;\nconst meetingName = wb.meeting_name || 'Meeting';\nconst minutes = $('Generate Meeting Minutes').first().json.response || '';\n\nconst systemPrompt = 'You extract structured key items from meeting minutes into a companion reference note.\\nOutput ONLY valid markdown with no preamble or explanation.\\nBe factual — use only what is explicitly in the minutes.\\nWikilink all people: [[Lastname Firstname]] if both known, else [[Firstname]].\\nOne sentence max per item. Omit sections with no content.';\n\nconst sections = '## People\\nEach person mentioned with role/context: - **[[Name]]** \\u2014 role\\n\\n## Projects & Initiatives\\n- **Name** \\u2014 description, status\\n\\n## Tools & Technologies\\n- **Name** \\u2014 usage context\\n\\n## Concepts & Terms\\nDomain terms explained or defined.\\n\\n## Decisions Made\\nCopy decision lines from minutes as-is.\\n\\n## Resources & References\\nDocuments, links, systems mentioned.';\n\nconst userMsg = 'Extract key items from these meeting minutes. Use the headings below; omit any section with no content.\\n\\n' + sections + '\\n\\n---\\nMEETING MINUTES:\\n' + minutes;\n\nreturn [{ json: { body: JSON.stringify({\n    model: 'qwen3.5:27b-32k',\n    stream: false,\n    think: false,\n    num_ctx: 32768,\n    system: systemPrompt,\n    prompt: userMsg\n}) } }];\n"
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-generate-key-items",
+      "name": "Generate Key Items",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-build-extract-note-body",
+      "name": "Build Extract Note Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3560,
+        100
+      ],
+      "parameters": {
+        "jsCode": "\nconst wb = $('Webhook').first().json.body;\nconst date = wb.date || new Date().toISOString().split('T')[0];\nconst meetingName = wb.meeting_name || 'Meeting';\nconst resp = $input.first().json;\nconst extract = resp.response || '';\nif (!extract) { return [{ json: { extractPath: '102 - Meeting Extracts/(extract skipped — LLM returned empty)' } }]; }\n\nconst now = new Date();\nconst _hTime = new Date(now.toLocaleString('en-US', {timeZone: 'Europe/Helsinki'}));\nconst _pad = n => String(n).padStart(2, '0');\nconst createdAt = `${_hTime.getFullYear()}-${_pad(_hTime.getMonth()+1)}-${_pad(_hTime.getDate())} ${_pad(_hTime.getHours())}:${_pad(_hTime.getMinutes())}`;\n\nconst safeName = meetingName.replace(/[\\/\\\\:*?\"<>|]/g, '-');\nconst path = `102 - Meeting Extracts/${date} ${safeName} - Key Items.md`;\nconst minutePath = `100 - Meeting minutes/${date} ${safeName}.md`;\nconst intelPath = `101 - Meeting Intelligence Reports/${date} ${safeName} - Intelligence Report.md`;\n\nconst participants = (wb.participants || []).join(', ');\nconst frontmatter = `---\\nmeeting: \"[[${minutePath}]]\"\\ndate: ${date}\\nparticipants: [${participants}]\\ntags: [meeting-extract]\\n---\\n\\n`;\nconst header = `Extract created: ${createdAt}\\nTemplate Version: M20.1\\n\\n---\\n\\n`;\nconst crossLinks = `\\n\\n---\\n\\n*[[${minutePath}]] \\u00b7 [[${intelPath}]]*`;\n\nreturn [{ json: { body: JSON.stringify({ path, content: frontmatter + header + extract + crossLinks, overwrite: true }), extractPath: path } }];\n"
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-create-extract-note",
+      "name": "Create Extract Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3760,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8090/api/create_note",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-parse-action-items",
+      "name": "Parse Action Items",
+      "type": "n8n-nodes-base.code",
+      "disabled": true,
+      "typeVersion": 2,
+      "position": [
+        4000,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const wb = $('Webhook').first().json.body;\nconst date = wb.date || new Date().toISOString().split('T')[0];\nconst meetingName = wb.meeting_name || 'Meeting';\nconst safeName = meetingName.replace(/[\\/\\\\:*?\"<>|]/g, '-');\nconst extractPath = $('Build Extract Note Body').first().json.extractPath || '';\n\n// Extract response from the LLM\nconst extract = $('Generate Key Items').first().json.response || '';\n\n// Parse ## Action Items section\nconst apMatch = extract.match(/##\\s*Action Items\\s*\\n([\\s\\S]*?)(?:\\n##|\\n---|\\s*$)/);\nlet apLines = [];\nif (apMatch) {\n  const section = apMatch[1];\n  apLines = section.split('\\n').filter(l => l.trim().match(/^-\\s+\\*\\*\\*Action Point/));\n}\n\nif (apLines.length === 0) {\n  return [{ json: { hasActions: false, actionItems: [], appendContent: '', date, meetingName } }];\n}\n\n// Build append content for Pending Actions.md\nconst sourceRef = extractPath ? `\\n<!-- Source: [[${extractPath}]] -->` : '';\nconst header = `\\n\\n## ${date} — ${safeName}${sourceRef}\\n\\n`;\nconst appendContent = header + apLines.join('\\n');\n\nreturn [{ json: { hasActions: true, actionItems: apLines, appendContent, date, meetingName, count: apLines.length } }];"
+      }
+    },
+    {
+      "id": "node-append-pending-actions",
+      "name": "Append Pending Actions",
+      "type": "n8n-nodes-base.httpRequest",
+      "disabled": true,
+      "typeVersion": 4.2,
+      "position": [
+        4240,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8090/api/append_note",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ path: \"035 - AI server/Pending Actions.md\", content: $json.appendContent }) }}",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true
+      }
+    },
+    {
+      "id": "node-build-tg-body",
+      "name": "Build Telegram Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3160,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "const wb = $('Webhook').first().json.body;\nconst date = wb.date || '';\nconst meetingName = wb.meeting_name || 'Meeting';\nconst chatId = wb.chat_id;\nconst safeName = meetingName.replace(/[\\/\\\\:*?\"<>|]/g, '-');\nconst intelPath = $('Build Intel Note Body').first().json.intelPath || '(intel not generated)';\nconst extractPath = $('Build Extract Note Body').first().json.extractPath || '(extract not generated)';\nconst apCount = $('Parse Action Items').first().json.count || 0;\nconst apLine = apCount > 0 ? `\\n✅ <b>${apCount} action item${apCount > 1 ? 's' : ''}</b> added to Pending Actions` : '';\n\nconst text = `<b>Meeting pipeline complete</b>\\n\\n📋 <code>100 - Meeting minutes/${date} ${safeName}.md</code>\\n🔍 <code>${intelPath}</code>\\n🗂 <code>${extractPath}</code>${apLine}`;\nreturn [{ json: { body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }) } }];"
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Webhook').first().json.body.bot_token }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "5ca53d4d-0b99-4a47-9ca4-c44a53e5f3cc",
+      "name": "Send Telegram Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=http://host.docker.internal:8000/jobs/{{ $('Submit Transcription Job').item.json.job_id }}",
+        "options": {}
+      },
+      "id": "node-delete-job",
+      "name": "Delete Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3560,
+        -96
+      ],
+      "continueOnFail": true
+    },
+    {
+      "id": "v2-build-speaker-topic",
+      "name": "Build Speaker+Topic Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst participants = webhookBody.participants;\nconst participantStr = Array.isArray(participants) && participants.length\n    ? participants.join(', ') : 'unknown';\nconst transcript = $input.first().json.data;\n\nconst systemPrompt = `You are a meeting transcript analyzer. Perform TWO tasks:\n\nTASK 1 — SPEAKER IDENTIFICATION\nRead the transcript and identify who each speaker label refers to.\nCRITICAL — VOICE FINGERPRINT PRIORITY:\n- Speakers already labeled with a real name (e.g. [Petri], [Mikko]) are biometrically verified. Do NOT change them.\n- Only identify unresolved labels: [SPEAKER_00], [SPEAKER_01], [Unknown], etc.\n- Look for self-introductions, direct address, role signals.\n- Cross-reference with known participants.\n\nTASK 2 — TOPIC SEGMENTATION\nIdentify ALL distinct discussion topics in the meeting. For each topic, provide:\n- A short descriptive name\n- The approximate start and end timestamps (from the transcript timestamps)\n- A one-sentence summary\n\nOUTPUT FORMAT (strict JSON, no markdown):\n{\n  \"speaker_map\": {\"SPEAKER_00\": \"Petri\", \"SPEAKER_01\": \"Mikko\"},\n  \"topics\": [\n    {\"name\": \"Project timeline update\", \"start\": 0.0, \"end\": 180.5, \"summary\": \"Discussed Q2 milestones\"},\n    {\"name\": \"Budget review\", \"start\": 181.0, \"end\": 450.2, \"summary\": \"Reviewed cost overruns\"}\n  ]\n}\n\nRULES:\n- Output ONLY valid JSON. No markdown, no explanation, no code fences.\n- Every second of the transcript must be covered by at least one topic.\n- Topics should be in chronological order.\n- Merge very short topics (< 30s) into adjacent ones.\n- Named speakers map to themselves in speaker_map.`;\n\nconst userMsg = `Known participants: ${participantStr}\\n\\nTranscript:\\n${transcript}`;\n\nreturn [{ json: {\n    body: JSON.stringify({\n        model: 'qwen3.5:27b-32k',\n        stream: false,\n        think: false,\n        num_ctx: 32768,\n        system: systemPrompt,\n        prompt: userMsg\n    })\n} }];\n"
+      }
+    },
+    {
+      "id": "v2-identify-speakers-topics",
+      "name": "Identify Speakers and Topics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1352,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 300000
+        }
+      }
+    },
+    {
+      "id": "v2-slice-topics",
+      "name": "Slice Topics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst date = webhookBody.date || new Date().toISOString().split('T')[0];\nconst participants = webhookBody.participants;\nconst participantStr = Array.isArray(participants) && participants.length\n    ? participants.join(', ') : 'unknown';\nconst meetingName = webhookBody.meeting_name || '';\nconst startTime = webhookBody.start_time || '';\nconst endTime = webhookBody.end_time || '';\nconst context = webhookBody.context || '';\nconst transcriptFull = $('Get Transcript').first().json.data;\n\n// Parse the LLM response\nlet parsed;\nconst rawResp = $input.first().json.response || '';\ntry {\n    // Strip markdown fences if present\n    let cleaned = rawResp.trim();\n    if (cleaned.startsWith('```')) {\n        cleaned = cleaned.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '');\n    }\n    parsed = JSON.parse(cleaned);\n} catch(e) {\n    // Fallback: single topic covering everything\n    parsed = {\n        speaker_map: {},\n        topics: [{name: 'Full Meeting', start: 0, end: 999999, summary: 'Complete meeting discussion'}]\n    };\n}\n\nconst speakerMap = parsed.speaker_map || {};\nconst topics = parsed.topics || [];\n\n// Build speaker map comment\nconst mapEntries = Object.entries(speakerMap).map(([k, v]) => `${k} = ${v}`).join(', ');\nconst speakerComment = `<!-- Speaker map: ${mapEntries} -->`;\n\n// Apply speaker names to transcript lines\nlet resolvedTranscript = transcriptFull;\nfor (const [label, name] of Object.entries(speakerMap)) {\n    resolvedTranscript = resolvedTranscript.replaceAll(`[${label}]`, `[${name}]`);\n}\n\n// Slice transcript by timestamps\n// Parse transcript lines to find timestamps — format: [HH:MM:SS.mmm --> HH:MM:SS.mmm] or [start - end]\nconst lines = resolvedTranscript.split('\\n');\n\nfunction timeToSeconds(timeStr) {\n    // Handle formats like \"00:01:30.500\" or \"90.5\"\n    const parts = timeStr.trim().split(':');\n    if (parts.length === 3) {\n        return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);\n    } else if (parts.length === 2) {\n        return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);\n    }\n    return parseFloat(timeStr) || 0;\n}\n\n// Build line-timestamp mapping\nconst lineTimestamps = [];\nlet lastTimestamp = 0;\nconst tsRegex = /\\[(\\d[\\d:.]+)\\s*(?:-->|->|-)\\s*(\\d[\\d:.]+)\\]/;\nfor (const line of lines) {\n    const match = line.match(tsRegex);\n    if (match) {\n        lastTimestamp = timeToSeconds(match[1]);\n    }\n    lineTimestamps.push({line, timestamp: lastTimestamp});\n}\n\n// For each topic, extract relevant lines\nconst topicItems = [];\nfor (let i = 0; i < topics.length; i++) {\n    const topic = topics[i];\n    const tStart = topic.start || 0;\n    const tEnd = topic.end || 999999;\n    \n    const topicLines = lineTimestamps\n        .filter(lt => lt.timestamp >= tStart && lt.timestamp <= tEnd)\n        .map(lt => lt.line);\n    \n    const topicTranscript = topicLines.join('\\n');\n    \n    topicItems.push({\n        json: {\n            topicIndex: i,\n            topicName: topic.name,\n            topicSummary: topic.summary || '',\n            topicTranscript: topicTranscript,\n            totalTopics: topics.length,\n            speakerComment: speakerComment,\n            speakerMap: speakerMap,\n            date: date,\n            meetingName: meetingName,\n            startTime: startTime,\n            endTime: endTime,\n            participantStr: participantStr,\n            context: context,\n        }\n    });\n}\n\n// If no topics extracted, pass through entire transcript as single topic\nif (topicItems.length === 0) {\n    topicItems.push({\n        json: {\n            topicIndex: 0,\n            topicName: 'Full Meeting',\n            topicSummary: 'Complete meeting discussion',\n            topicTranscript: resolvedTranscript,\n            totalTopics: 1,\n            speakerComment: speakerComment,\n            speakerMap: speakerMap,\n            date: date,\n            meetingName: meetingName,\n            startTime: startTime,\n            endTime: endTime,\n            participantStr: participantStr,\n            context: context,\n        }\n    });\n}\n\nreturn topicItems;\n"
+      }
+    },
+    {
+      "id": "v2-build-topic-prompt",
+      "name": "Build Topic Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1752,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst item = $input.item.json;\nconst topicName = item.topicName;\nconst topicTranscript = item.topicTranscript;\n\nconst systemPrompt = `You analyze a SINGLE TOPIC from a meeting transcript.\nOutput must be in this exact markdown format:\n\n### ${topicName}\n<One sentence outcome-oriented summary>\n**Key Points:**\n- <concrete bullet — include specifics: numbers, owners, systems, dates>\n**Outcome:** <Decision made | Action(s) created | No outcome>\n\nDECISIONS (if any):\n- ***Decision:*** **What:** <description>\n\nACTION ITEMS (if any, use EXACT format):\n- [ ] ***Action Point:*** <emoji> **What:** <description> **Who:** [[Name]] **When:** YYYY-MM-DD or TBD\n\nCOMPLEXITY EMOJI (one per action point):\n🟩 Easy — < 1 hour\n🟨 Involved — 1-4 hours\n🟧 Moderate — 1-3 days\n🟥 Hard — > 3 days\n\nRULES:\n- Names in Obsidian wikilinks: [[Lastname Firstname]] if both known, else [[FirstName]]\n- Do NOT invent facts. Only use what is explicitly in the transcript.\n- Include direct quotes for key statements (> blockquote format).\n- Capture ALL details: numbers, dates, systems, names, constraints.\n- **When:** must be plain text date or TBD. Never wrap in [[wikilinks]].\n- Language: Business American English.`;\n\nconst userMsg = `Topic: ${topicName}\\n\\nTranscript excerpt:\\n${topicTranscript}`;\n\nreturn { json: {\n    body: JSON.stringify({\n        model: 'qwen3:8b',\n        stream: false,\n        think: false,\n        num_ctx: 8192,\n        system: systemPrompt,\n        prompt: userMsg\n    }),\n    topicIndex: item.topicIndex,\n    topicName: item.topicName,\n    totalTopics: item.totalTopics,\n    speakerComment: item.speakerComment,\n    date: item.date,\n    meetingName: item.meetingName,\n    startTime: item.startTime,\n    endTime: item.endTime,\n    participantStr: item.participantStr,\n    context: item.context,\n} };\n",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "v2-analyze-topic",
+      "name": "Analyze Topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1952,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst item = $input.item.json;\nconst body = item.body;\n\n// Call Ollama\nconst resp = await fetch('http://host.docker.internal:11434/api/generate', {\n    method: 'POST',\n    headers: {'Content-Type': 'application/json'},\n    body: body,\n    signal: AbortSignal.timeout(300000),\n});\nconst result = await resp.json();\n\nreturn {\n    json: {\n        response: result.response || '',\n        topicIndex: item.topicIndex,\n        topicName: item.topicName,\n        totalTopics: item.totalTopics,\n    }\n};\n"
+      }
+    },
+    {
+      "id": "v2-assemble-minutes",
+      "name": "Assemble Minutes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2152,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst items = $input.all();\n\n// Get metadata from first item's input\nconst firstInput = $('Slice Topics').first().json;\nconst date = firstInput.date;\nconst meetingName = firstInput.meetingName;\nconst startTime = firstInput.startTime;\nconst endTime = firstInput.endTime;\nconst participantStr = firstInput.participantStr;\nconst speakerComment = firstInput.speakerComment;\nconst speakerMap = firstInput.speakerMap || {};\nconst context = firstInput.context || '';\n\n// Build attendees from speaker map\nconst attendees = new Set();\nattendees.add('[[Rantala Petri]]');\nfor (const name of Object.values(speakerMap)) {\n    if (name && name !== 'Unknown' && !name.startsWith('SPEAKER_')) {\n        attendees.add(`[[${name}]]`);\n    }\n}\nconst attendeeLines = [...attendees].map(a => `- [x] ${a}`).join('\\n');\n\n// Sort topic results by index\nconst sorted = items.map(i => ({\n    index: i.json.topicIndex || 0,\n    name: i.json.topicName || 'Topic',\n    content: i.json.response || '',\n})).sort((a, b) => a.index - b.index);\n\n// Build agenda\nconst agenda = sorted.map(t => `- [[#${t.name}]]`).join('\\n');\n\n// Build notes body from all topic analyses\nconst notesBody = sorted.map(t => t.content).join('\\n\\n');\n\n// Assemble full minutes\nconst minutes = `${speakerComment}\n\n---\n- **Date:** [[${date}]]\n- **Start Time:** ${startTime || 'unknown'}\n- **End Time:** ${endTime || 'unknown'}\n- **Attendees:**\n${attendeeLines}\n\n#### Link(s) to project(s) or note(s) if any\n-\n\n## Meeting Summary\n${sorted.map(t => `- **${t.name}**`).join('\\n')}\n\n## Agenda\n${agenda}\n\n## Notes\n\n${notesBody}\n\n## Screenshots\n`;\n\nreturn [{ json: { minutes: minutes } }];\n"
+      }
+    },
+    {
+      "id": "v2-build-note-body",
+      "name": "Build Note Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2352,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst date = webhookBody.date || new Date().toISOString().split('T')[0];\nconst meetingName = webhookBody.meeting_name || 'Meeting';\n\nconst minutes = $input.first().json.minutes;\n\nif (!minutes) {\n    throw new Error('No minutes assembled');\n}\n\nconst now = new Date();\nconst _hTime = new Date(now.toLocaleString('en-US', {timeZone: 'Europe/Helsinki'}));\nconst _pad = n => String(n).padStart(2, '0');\nconst createdAt = `${_hTime.getFullYear()}-${_pad(_hTime.getMonth()+1)}-${_pad(_hTime.getDate())} ${_pad(_hTime.getHours())}:${_pad(_hTime.getMinutes())}`;\n\nconst header = `<div style=\"font-size: 0.5em;\"> These notes were created using a temporary audio recording of a meeting held on ${date}. The audio was transcribed using a cloud-based service to support accurate note-taking. The recording was deleted immediately after transcription. The final document is stored locally and not shared externally. </div>\n\nMinutes created: ${createdAt} © Petri Rantala\nTags: #📓 ⚖ ✅ 🤝\nTemplate Version: 2.0-v2\nPipeline: divide-and-conquer (M59)\n\n---\n\n`;\n\nconst safeName = meetingName.replace(/[\\/\\\\:*?\"<>|]/g, '-');\nconst path = `100 - Meeting minutes/${date} ${safeName}.md`;\nconst intelPath = `101 - Meeting Intelligence Reports/${date} ${safeName} - Intelligence Report.md`;\nconst crossLink = `\\n\\n---\\n\\n*Intelligence Report: [[${intelPath}]]*`;\nreturn [{ json: { body: JSON.stringify({ path, content: header + minutes + crossLink, overwrite: true }) } }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get File Path",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Path": {
+      "main": [
+        [
+          {
+            "node": "Download Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Audio": {
+      "main": [
+        [
+          {
+            "node": "Submit Transcription Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Transcription Job": {
+      "main": [
+        [
+          {
+            "node": "Poll Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Job Status": {
+      "main": [
+        [
+          {
+            "node": "Check Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status": {
+      "main": [
+        [
+          {
+            "node": "Get Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 15s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 15s": {
+      "main": [
+        [
+          {
+            "node": "Poll Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Transcript": {
+      "main": [
+        [
+          {
+            "node": "Warmup Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Warmup Ollama": {
+      "main": [
+        [
+          {
+            "node": "Build Speaker+Topic Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Speaker+Topic Prompt": {
+      "main": [
+        [
+          {
+            "node": "Identify Speakers and Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identify Speakers and Topics": {
+      "main": [
+        [
+          {
+            "node": "Slice Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slice Topics": {
+      "main": [
+        [
+          {
+            "node": "Build Topic Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Topic Prompt": {
+      "main": [
+        [
+          {
+            "node": "Analyze Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Topic": {
+      "main": [
+        [
+          {
+            "node": "Assemble Minutes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Minutes": {
+      "main": [
+        [
+          {
+            "node": "Build Note Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Note Body": {
+      "main": [
+        [
+          {
+            "node": "Create Vault Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Vault Note": {
+      "main": [
+        [
+          {
+            "node": "Get Transcript JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Transcript JSON": {
+      "main": [
+        [
+          {
+            "node": "Compute Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Metrics": {
+      "main": [
+        [
+          {
+            "node": "Build RAG Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build RAG Query": {
+      "main": [
+        [
+          {
+            "node": "Fetch Historical Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Historical Context": {
+      "main": [
+        [
+          {
+            "node": "Build Intel LLM Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Intel LLM Body": {
+      "main": [
+        [
+          {
+            "node": "Generate Intel Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Intel Report": {
+      "main": [
+        [
+          {
+            "node": "Build Intel Note Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Intel Note Body": {
+      "main": [
+        [
+          {
+            "node": "Create Intel Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Intel Note": {
+      "main": [
+        [
+          {
+            "node": "Build Extract LLM Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Extract LLM Body": {
+      "main": [
+        [
+          {
+            "node": "Generate Key Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Key Items": {
+      "main": [
+        [
+          {
+            "node": "Build Extract Note Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Extract Note Body": {
+      "main": [
+        [
+          {
+            "node": "Create Extract Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Extract Note": {
+      "main": [
+        [
+          {
+            "node": "Parse Action Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Action Items": {
+      "main": [
+        [
+          {
+            "node": "Append Pending Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Pending Actions": {
+      "main": [
+        [
+          {
+            "node": "Build Telegram Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Telegram Body": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Notification": {
+      "main": [
+        [
+          {
+            "node": "Delete Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "errorWorkflow": "error-notifier"
+  },
+  "staticData": null,
+  "tags": [],
+  "pinData": {}
+}
