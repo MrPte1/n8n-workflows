@@ -26,6 +26,47 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "validate-file-id",
+              "leftValue": "={{ $json.body.file_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            },
+            {
+              "id": "validate-bot-token",
+              "leftValue": "={{ $json.body.bot_token }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-validate-input",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -48,
+        -96
+      ]
+    },
+    {
+      "parameters": {
         "respondWith": "text",
         "responseBody": "Pipeline started",
         "options": {}
@@ -35,8 +76,25 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        -48,
+        160,
         -208
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=Missing required fields: file_id and bot_token",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "node-reject-invalid",
+      "name": "Reject Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        160,
+        32
       ]
     },
     {
@@ -257,7 +315,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst date = webhookBody.date || new Date().toISOString().split('T')[0];\nconst participants = webhookBody.participants;\nconst participantStr = Array.isArray(participants) && participants.length\n    ? participants.join(', ') : '';\nconst meetingName = webhookBody.meeting_name || '';\nconst startTime = webhookBody.start_time || '';\nconst endTime = webhookBody.end_time || '';\nconst transcript = $input.first().json.data;\n\nconst systemPrompt = `You create meeting minutes from transcripts.\nOutput must be exactly ONE markdown document.\nLanguage: Business American English.\n\n== PHASE 1 — SPEAKER IDENTIFICATION ==\nBefore writing, read the entire transcript carefully and build a speaker map.\n\nCRITICAL — VOICE FINGERPRINT PRIORITY:\n- Speakers already labeled with a real person's name (e.g. [Petri], [Mikko]) have been identified by voice fingerprint biometrics. These assignments are VERIFIED and AUTHORITATIVE.\n- Do NOT reassign, swap, or \"correct\" named speakers based on conversation content. Preserve them exactly as-is.\n- Only apply identification logic to unresolved labels: [SPEAKER_00], [SPEAKER_01], [Speaker 0], [Unknown], etc.\n\nFor unresolved SPEAKER_XX labels, look for these clues in order:\n1. Self-introductions: \"I'm [name]\", \"This is [name]\", \"my name is [name]\"\n2. Direct address: \"thanks [name]\", \"[name], can you...\", \"[name] what do you think\"\n3. Role or ownership signals: \"my project\", \"my team\", \"the system I built\", \"I own this\"\n4. Cross-reference with the known participants list in the user message\n\nWrite your speaker map as a comment block at the very start:\n<!-- Speaker map: SPEAKER_00 = Petri, SPEAKER_01 = Mikko -->\n(Named speakers map to themselves: Petri = Petri)\n\nThen use the resolved names throughout. If an unresolved speaker cannot be confidently identified, use [[Speaker N]].\n\n== PHASE 2 — MEETING MINUTES ==\n\nFACT RULES:\n- Do NOT invent facts. Use ONLY provided metadata and explicit transcript content.\n- If something is unknown, leave it blank.\n\nATTENDEES:\n- Always include [[Rantala Petri]].\n- Add others only if explicitly identified in the transcript.\n\nNAMES:\n- Obsidian wikilinks: [[Lastname Firstname]] if both known, else [[FirstName]] or [[Speaker N]].\n- Never guess last names.\n\nSTRUCTURE:\n- Use the markdown skeleton exactly. Preserve headings and order.\n- Repeat '### <topic name>' blocks for each distinct topic.\n\nAGENDA — MANDATORY:\n- List EVERY \"### <topic name>\" heading from ## Notes in order, as \"[[#topic name]]\" wikilinks.\n- Exact format (double brackets, hash immediately followed by the heading text, no space between # and text):\n  - [[#First topic]]\n  - [[#Second topic]]\n  (and so on for every heading — never skip one)\n- CRITICAL: The [[# prefix is ONLY for agenda wikilinks. Do NOT write \"### #Topic\" in Notes — headings must be \"### Topic\" (no # after ###).\n\nCONTENT RICHNESS — CRITICAL:\n- Capture ALL information from the transcript. Do NOT summarize away detail.\n- Each topic must reflect what was actually said: specific numbers, dates, systems, names, constraints.\n- Include direct quotes for key statements (> blockquote format).\n- Capture ALL decisions (major and minor) with rationale if stated.\n- Capture ALL action items — explicit and implicit.\n- Use multiple '### <sub-topic>' blocks rather than truncating content.\n- Length must match depth of conversation. 1-hour meeting → comprehensive notes.\n- Never repeat the same bullet. If you find yourself writing the same sentence twice, stop and write something different or move on.\n\nTOPIC BLOCK FORMAT (MANDATORY):\n### <topic name>\n<One sentence outcome-oriented summary>\n**Key Points:**\n- <concrete bullet — include specifics: numbers, owners, systems, dates>\n**Outcome:** <Decision made | Action(s) created | No outcome>\n\nACTION POINT FORMAT (MANDATORY — follow exactly, no deviations):\n- [ ] ***Action Point:*** **What:** <description> **Who:** [[Lastname Firstname]] **When:** YYYY-MM-DD or TBD\nRULES:\n- The leading \"- [ ]\" checkbox is REQUIRED on every action point. Never omit it.\n- **When:** must be plain text: a date (2026-03-18) or the word TBD. Never wrap dates or TBD in [[wikilinks]].\n- No parenthetical comments after **When:**. Date or TBD only.\n\nDECISION FORMAT:\n- ***Decision:*** **What:** <description>\n\nSCREENSHOT RULES:\n- Only list screenshots that were explicitly announced in the transcript. Do not invent them.\n\nMARKDOWN SKELETON:\n---\n- **Date:** [[<date>]]\n- **Start Time:** <hh:mm>\n- **End Time:** <hh:mm>\n- **Attendees:**\n- [x] [[<People>]]\n\n#### Link(s) to project(s) or note(s) if any\n-\n\n## Meeting Summary\n\n## Agenda\n\n## Notes\n\n### <topic name>\n\n## Screenshots\n`;\n\nconst context = webhookBody.context || '';\nconst contextLine = context ? `- Additional context: ${context}\\n` : '';\nconst userMsg = `Meeting metadata:\n- Date: ${date}\n- Start time: ${startTime || 'unknown'}\n- End time: ${endTime || 'unknown'}\n- Meeting name: ${meetingName}\n- Known participants: ${participantStr || 'unknown'}\n${contextLine}\nTranscript:\n${transcript}`;\n\nreturn [{ json: {\n    body: JSON.stringify({\n        model: 'qwen3.5:27b-32k',\n        stream: false,\n        think: false,\n        num_ctx: 32768,\n        system: systemPrompt,\n        prompt: userMsg\n    })\n} }];\n"
+        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst date = webhookBody.date || new Date().toISOString().split('T')[0];\nconst participants = webhookBody.participants;\nconst participantStr = Array.isArray(participants) && participants.length\n    ? participants.join(', ') : '';\nconst meetingName = webhookBody.meeting_name || '';\nconst startTime = webhookBody.start_time || '';\nconst endTime = webhookBody.end_time || '';\nconst transcript = $input.first().json.data;\n\nconst systemPrompt = `You create meeting minutes from transcripts.\nOutput must be exactly ONE markdown document.\nLanguage: Business American English.\n\n== PHASE 1 — SPEAKER IDENTIFICATION ==\nBefore writing, read the entire transcript carefully and build a speaker map.\n\nCRITICAL — VOICE FINGERPRINT PRIORITY:\n- Speakers already labeled with a real person's name (e.g. [Petri], [Mikko]) have been identified by voice fingerprint biometrics. These assignments are VERIFIED and AUTHORITATIVE.\n- Do NOT reassign, swap, or \"correct\" named speakers based on conversation content. Preserve them exactly as-is.\n- Only apply identification logic to unresolved labels: [SPEAKER_00], [SPEAKER_01], [Speaker 0], [Unknown], etc.\n\nFor unresolved SPEAKER_XX labels, look for these clues in order:\n1. Self-introductions: \"I'm [name]\", \"This is [name]\", \"my name is [name]\"\n2. Direct address: \"thanks [name]\", \"[name], can you...\", \"[name] what do you think\"\n3. Role or ownership signals: \"my project\", \"my team\", \"the system I built\", \"I own this\"\n4. Cross-reference with the known participants list in the user message\n\nWrite your speaker map as a comment block at the very start:\n<!-- Speaker map: SPEAKER_00 = Petri, SPEAKER_01 = Mikko -->\n(Named speakers map to themselves: Petri = Petri)\n\nThen use the resolved names throughout. If an unresolved speaker cannot be confidently identified, use [[Speaker N]].\n\n== PHASE 2 — MEETING MINUTES ==\n\nFACT RULES:\n- Do NOT invent facts. Use ONLY provided metadata and explicit transcript content.\n- If something is unknown, leave it blank.\n\nATTENDEES:\n- Always include [[Rantala Petri]].\n- Add others only if explicitly identified in the transcript.\n\nNAMES:\n- Obsidian wikilinks: [[Lastname Firstname]] if both known, else [[FirstName]] or [[Speaker N]].\n- Never guess last names.\n\nSTRUCTURE:\n- Use the markdown skeleton exactly. Preserve headings and order.\n- Repeat '### <topic name>' blocks for each distinct topic.\n\nAGENDA — MANDATORY:\n- List EVERY \"### <topic name>\" heading from ## Notes in order, as \"[[#topic name]]\" wikilinks.\n- Exact format (double brackets, hash immediately followed by the heading text, no space between # and text):\n  - [[#First topic]]\n  - [[#Second topic]]\n  (and so on for every heading — never skip one)\n- CRITICAL: The [[# prefix is ONLY for agenda wikilinks. Do NOT write \"### #Topic\" in Notes — headings must be \"### Topic\" (no # after ###).\n\nCONTENT RICHNESS — CRITICAL:\n- Capture ALL information from the transcript. Do NOT summarize away detail.\n- Each topic must reflect what was actually said: specific numbers, dates, systems, names, constraints.\n- Include direct quotes for key statements (> blockquote format).\n- Capture ALL decisions (major and minor) with rationale if stated.\n- Capture ALL action items — explicit and implicit.\n- Use multiple '### <sub-topic>' blocks rather than truncating content.\n- Length must match depth of conversation. 1-hour meeting → comprehensive notes.\n- Never repeat the same bullet. If you find yourself writing the same sentence twice, stop and write something different or move on.\n\nTOPIC BLOCK FORMAT (MANDATORY):\n### <topic name>\n<One sentence outcome-oriented summary>\n**Key Points:**\n- <concrete bullet — include specifics: numbers, owners, systems, dates>\n**Outcome:** <Decision made | Action(s) created | No outcome>\n\nACTION POINT FORMAT (MANDATORY — follow exactly, no deviations):\n- [ ] ***Action Point:*** **What:** <description> **Who:** [[Lastname Firstname]] **When:** YYYY-MM-DD or TBD\nRULES:\n- The leading \"- [ ]\" checkbox is REQUIRED on every action point. Never omit it.\n- **When:** must be plain text: a date (2026-03-18) or the word TBD. Never wrap dates or TBD in [[wikilinks]].\n- No parenthetical comments after **When:**. Date or TBD only.\n\nCOMPLEXITY TAG (MANDATORY on every action point):\nPlace exactly one emoji between ***Action Point:*** and **What:** to indicate complexity:\n🟩 Easy — single discrete action, no dependencies, < 1 hour (send email, share file, forward doc)\n🟨 Involved — straightforward work, 1-4 hours (prepare document, review report, schedule meeting)\n🟧 Moderate — multi-step, requires judgment or coordination, 1-3 days (create proposal, investigate)\n🟥 Hard — significant effort, multiple stakeholders, > 3 days (redesign process, build business case)\nExample: - [ ] ***Action Point:*** 🟨 **What:** Send CAD files **Who:** [[Doe John]] **When:** 2026-03-20\n\nDECISION FORMAT:\n- ***Decision:*** **What:** <description>\n\nSCREENSHOT RULES:\n- Only list screenshots that were explicitly announced in the transcript. Do not invent them.\n\nMARKDOWN SKELETON:\n---\n- **Date:** [[<date>]]\n- **Start Time:** <hh:mm>\n- **End Time:** <hh:mm>\n- **Attendees:**\n- [x] [[<People>]]\n\n#### Link(s) to project(s) or note(s) if any\n-\n\n## Meeting Summary\n\n## Agenda\n\n## Notes\n\n### <topic name>\n\n## Screenshots\n`;\n\nconst context = webhookBody.context || '';\nconst contextLine = context ? `- Additional context: ${context}\\n` : '';\n\n// Cap transcript to avoid context overflow (system ~4k tokens, need ~12k for output)\nconst MAX_TRANSCRIPT_CHARS = 45000;\nlet safeTranscript = transcript || '';\nlet truncNote = '';\nif (safeTranscript.length > MAX_TRANSCRIPT_CHARS) {\n    truncNote = `\\n\\n[TRANSCRIPT TRUNCATED: original ${safeTranscript.length} chars, showing first ${MAX_TRANSCRIPT_CHARS}]`;\n    safeTranscript = safeTranscript.substring(0, MAX_TRANSCRIPT_CHARS);\n}\n\nconst userMsg = `Meeting metadata:\n- Date: ${date}\n- Start time: ${startTime || 'unknown'}\n- End time: ${endTime || 'unknown'}\n- Meeting name: ${meetingName}\n- Known participants: ${participantStr || 'unknown'}\n${contextLine}\nTranscript:\n${safeTranscript}${truncNote}`;\n\nreturn [{ json: {\n    body: JSON.stringify({\n        model: 'qwen3.5:27b-32k',\n        stream: false,\n        think: false,\n        num_ctx: 32768,\n        system: systemPrompt,\n        prompt: userMsg\n    })\n} }];\n"
       }
     },
     {
@@ -558,12 +616,30 @@
       "main": [
         [
           {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
             "node": "Respond to Webhook",
             "type": "main",
             "index": 0
           },
           {
             "node": "Get File Path",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject Invalid",
             "type": "main",
             "index": 0
           }
