@@ -518,49 +518,16 @@
       "continueOnFail": true
     },
     {
-      "id": "v2-build-speaker-topic",
-      "name": "Build Speaker+Topic Prompt",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1152,
-        300
-      ],
-      "parameters": {
-        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst participants = webhookBody.participants;\nconst participantStr = Array.isArray(participants) && participants.length\n    ? participants.join(', ') : 'unknown';\nconst rawTranscript = $('Get Transcript').first().json.data || '';\n// Cap transcript for speaker/topic identification \u2014 45k chars fits in 32k context with system prompt\nconst MAX_TRANSCRIPT = 45000;\nconst transcript = rawTranscript.length > MAX_TRANSCRIPT\n    ? rawTranscript.substring(0, MAX_TRANSCRIPT) + '\\n\\n[... transcript truncated for identification \u2014 full text used for per-topic analysis ...]'\n    : rawTranscript;\n\nconst systemPrompt = `You are a meeting transcript analyzer. Perform TWO tasks:\n\nTASK 1 \u2014 SPEAKER IDENTIFICATION\nRead the transcript and identify who each speaker label refers to.\nCRITICAL \u2014 VOICE FINGERPRINT PRIORITY:\n- Speakers already labeled with a real name (e.g. [Petri], [Mikko]) are biometrically verified. Do NOT change them.\n- Only identify unresolved labels: [SPEAKER_00], [SPEAKER_01], [Unknown], etc.\n- Look for self-introductions, direct address, role signals.\n- Cross-reference with known participants.\n\nTASK 2 \u2014 TOPIC SEGMENTATION\nIdentify ALL distinct discussion topics in the meeting. For each topic, provide:\n- A short descriptive name\n- The approximate start and end timestamps (from the transcript timestamps)\n- A one-sentence summary\n\nOUTPUT FORMAT (strict JSON, no markdown):\n{\n  \"speaker_map\": {\"SPEAKER_00\": \"Petri\", \"SPEAKER_01\": \"Mikko\"},\n  \"topics\": [\n    {\"name\": \"Project timeline update\", \"start\": 0.0, \"end\": 180.5, \"summary\": \"Discussed Q2 milestones\"},\n    {\"name\": \"Budget review\", \"start\": 181.0, \"end\": 450.2, \"summary\": \"Reviewed cost overruns\"}\n  ]\n}\n\nRULES:\n- Output ONLY valid JSON. No markdown, no explanation, no code fences.\n- Every second of the transcript must be covered by at least one topic.\n- Topics should be in chronological order.\n- Merge very short topics (< 30s) into adjacent ones.\n- The LAST topic MUST have end: 999999 to capture all remaining content.\n- Named speakers map to themselves in speaker_map.`;\n\nconst userMsg = `Known participants: ${participantStr}\\n\\nTranscript:\\n${transcript}`;\n\nreturn [{ json: {\n    body: JSON.stringify({\n        model: 'qwen3.5:27b-32k',\n        stream: false,\n        think: false,\n        num_ctx: 32768,\n        system: systemPrompt,\n        prompt: userMsg\n    })\n} }];\n"
-      }
-    },
-    {
-      "id": "v2-identify-speakers-topics",
-      "name": "Identify Speakers and Topics",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1352,
-        300
-      ],
-      "parameters": {
-        "method": "POST",
-        "url": "http://host.docker.internal:11434/api/generate",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ $json.body }}",
-        "options": {
-          "timeout": 900000
-        }
-      }
-    },
-    {
       "id": "v2-slice-topics",
       "name": "Slice Topics",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1552,
+        1952,
         300
       ],
       "parameters": {
-        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst date = webhookBody.date || new Date().toISOString().split('T')[0];\nconst participants = webhookBody.participants;\nconst participantStr = Array.isArray(participants) && participants.length\n    ? participants.join(', ') : 'unknown';\nconst meetingName = webhookBody.meeting_name || '';\nconst startTime = webhookBody.start_time || '';\nconst endTime = webhookBody.end_time || '';\nconst context = webhookBody.context || '';\nconst transcriptFull = $('Get Transcript').first().json.data;\n\n// Parse the LLM response\nlet parsed;\nconst rawResp = $input.first().json.response || '';\ntry {\n    // Strip markdown fences if present\n    let cleaned = rawResp.trim();\n    if (cleaned.startsWith('```')) {\n        cleaned = cleaned.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '');\n    }\n    parsed = JSON.parse(cleaned);\n} catch(e) {\n    // Fallback: single topic covering everything\n    parsed = {\n        speaker_map: {},\n        topics: [{name: 'Full Meeting', start: 0, end: 999999, summary: 'Complete meeting discussion'}]\n    };\n}\n\nconst rawSpeakerMap = parsed.speaker_map || {};\nconst topics = parsed.topics || [];\n\n// H2 fix: validate speaker map against known participants to prevent phantom attendees\nconst knownLower = participantStr.toLowerCase().split(',').map(p => p.trim()).filter(Boolean);\nconst speakerMap = {};\nfor (const [label, name] of Object.entries(rawSpeakerMap)) {\n    // Accept if label is already a real name (biometric match from voice recognition)\n    if (!label.startsWith('SPEAKER_') && label !== 'Unknown') {\n        speakerMap[label] = name;\n        continue;\n    }\n    // Check if LLM-assigned name matches a known participant\n    const nameLower = name.toLowerCase();\n    const isKnown = knownLower.some(p => {\n        const parts = p.split(' ');\n        return parts.some(part => part.length > 2 && nameLower.includes(part));\n    });\n    speakerMap[label] = isKnown ? name : label;\n}\n\n// Build speaker map comment\nconst mapEntries = Object.entries(speakerMap).map(([k, v]) => `${k} = ${v}`).join(', ');\nconst speakerComment = `<!-- Speaker map: ${mapEntries} -->`;\n\n// Apply speaker names to transcript lines\nlet resolvedTranscript = transcriptFull;\nfor (const [label, name] of Object.entries(speakerMap)) {\n    resolvedTranscript = resolvedTranscript.replaceAll(`[${label}]`, `[${name}]`);\n}\n\n// Slice transcript by timestamps\n// Parse transcript lines to find timestamps \u2014 format: [HH:MM:SS.mmm --> HH:MM:SS.mmm] or [start - end]\nconst lines = resolvedTranscript.split('\\n');\n\nfunction timeToSeconds(timeStr) {\n    // Handle formats like \"00:01:30.500\" or \"90.5\"\n    const parts = timeStr.trim().split(':');\n    if (parts.length === 3) {\n        return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);\n    } else if (parts.length === 2) {\n        return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);\n    }\n    return parseFloat(timeStr) || 0;\n}\n\n// Build line-timestamp mapping\nconst lineTimestamps = [];\nlet lastTimestamp = 0;\nconst tsRegex = /\\[(\\d[\\d:.]+)\\s*(?:-->|->|\\u2013|\\u2014|-)\\s*(\\d[\\d:.]+)\\]/;\nfor (const line of lines) {\n    const match = line.match(tsRegex);\n    if (match) {\n        lastTimestamp = timeToSeconds(match[1]);\n    }\n    lineTimestamps.push({line, timestamp: lastTimestamp});\n}\n\n// For each topic, extract relevant lines\nconst topicItems = [];\nfor (let i = 0; i < topics.length; i++) {\n    const topic = topics[i];\n    const tStart = topic.start || 0;\n    const tEnd = topic.end || 999999;\n    \n    const topicLines = lineTimestamps\n        .filter(lt => lt.timestamp >= tStart && lt.timestamp <= tEnd)\n        .map(lt => lt.line);\n    \n    const topicTranscript = topicLines.join('\\n');\n    \n    topicItems.push({\n        json: {\n            topicIndex: i,\n            topicName: topic.name,\n            topicSummary: topic.summary || '',\n            topicTranscript: topicTranscript,\n            totalTopics: topics.length,\n            speakerComment: speakerComment,\n            speakerMap: speakerMap,\n            date: date,\n            meetingName: meetingName,\n            startTime: startTime,\n            endTime: endTime,\n            participantStr: participantStr,\n            context: context,\n        }\n    });\n}\n\n// H1 fix: catch orphaned lines past the last topic's end timestamp\nif (topicItems.length > 0) {\n    const coveredMax = Math.max(...topics.map(t => t.end || 0));\n    const orphanLines = lineTimestamps\n        .filter(lt => lt.timestamp > coveredMax)\n        .map(lt => lt.line)\n        .filter(l => l.trim());\n    if (orphanLines.length > 0) {\n        // Append orphans to the last topic\n        const lastItem = topicItems[topicItems.length - 1];\n        lastItem.json.topicTranscript += '\\n' + orphanLines.join('\\n');\n    }\n}\n\n// If no topics extracted, pass through entire transcript as single topic\nif (topicItems.length === 0) {\n    topicItems.push({\n        json: {\n            topicIndex: 0,\n            topicName: 'Full Meeting',\n            topicSummary: 'Complete meeting discussion',\n            topicTranscript: resolvedTranscript,\n            totalTopics: 1,\n            speakerComment: speakerComment,\n            speakerMap: speakerMap,\n            date: date,\n            meetingName: meetingName,\n            startTime: startTime,\n            endTime: endTime,\n            participantStr: participantStr,\n            context: context,\n        }\n    });\n}\n\nreturn topicItems;\n"
+        "jsCode": "\nconst webhookBody = $('Webhook').first().json.body;\nconst date = webhookBody.date || new Date().toISOString().split('T')[0];\nconst participants = webhookBody.participants;\nconst participantStr = Array.isArray(participants) && participants.length\n    ? participants.join(', ') : 'unknown';\nconst meetingName = webhookBody.meeting_name || '';\nconst startTime = webhookBody.start_time || '';\nconst endTime = webhookBody.end_time || '';\nconst context = webhookBody.context || '';\nconst transcriptFull = $('Get Transcript').first().json.data;\n\n// Two-pass architecture: speaker_map from Build Topic Segmentation Prompt, topics from Identify Topics\n// Parse speaker map (resolved in pass 1, forwarded through pass 2)\nconst speakerMapData = $('Build Topic Segmentation Prompt').first().json.speakerMap || {};\nconst rawSpeakerMap = speakerMapData;\n\n// Parse topics from pass 2 LLM response\nlet topics = [];\nconst rawTopicResp = $input.first().json.response || '';\ntry {\n    let cleaned = rawTopicResp.trim();\n    if (cleaned.startsWith('```')) {\n        cleaned = cleaned.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '');\n    }\n    const parsed = JSON.parse(cleaned);\n    topics = parsed.topics || [];\n} catch(e) {\n    // Fallback: single topic covering everything\n    topics = [{name: 'Full Meeting', start: 0, end: 999999, summary: 'Complete meeting discussion'}];\n}\n\n// H2 fix: validate speaker map against known participants to prevent phantom attendees\nconst knownLower = participantStr.toLowerCase().split(',').map(p => p.trim()).filter(Boolean);\nconst speakerMap = {};\nfor (const [label, name] of Object.entries(rawSpeakerMap)) {\n    // Accept if label is already a real name (biometric match from voice recognition)\n    if (!label.startsWith('SPEAKER_') && label !== 'Unknown') {\n        speakerMap[label] = name;\n        continue;\n    }\n    // Check if LLM-assigned name matches a known participant\n    const nameLower = name.toLowerCase();\n    const isKnown = knownLower.some(p => {\n        const parts = p.split(' ');\n        return parts.some(part => part.length > 2 && nameLower.includes(part));\n    });\n    speakerMap[label] = isKnown ? name : label;\n}\n\n// Build speaker map comment\nconst mapEntries = Object.entries(speakerMap).map(([k, v]) => `${k} = ${v}`).join(', ');\nconst speakerComment = `<!-- Speaker map: ${mapEntries} -->`;\n\n// Apply speaker names to transcript lines\nlet resolvedTranscript = transcriptFull;\nfor (const [label, name] of Object.entries(speakerMap)) {\n    resolvedTranscript = resolvedTranscript.replaceAll(`[${label}]`, `[${name}]`);\n}\n\n// Slice transcript by timestamps\n// Parse transcript lines to find timestamps \u2014 format: [HH:MM:SS.mmm --> HH:MM:SS.mmm] or [start - end]\nconst lines = resolvedTranscript.split('\\n');\n\nfunction timeToSeconds(timeStr) {\n    // Handle formats like \"00:01:30.500\" or \"90.5\"\n    const parts = timeStr.trim().split(':');\n    if (parts.length === 3) {\n        return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);\n    } else if (parts.length === 2) {\n        return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);\n    }\n    return parseFloat(timeStr) || 0;\n}\n\n// Build line-timestamp mapping\nconst lineTimestamps = [];\nlet lastTimestamp = 0;\nconst tsRegex = /\\[(\\d[\\d:.]+)\\s*(?:-->|->|\\u2013|\\u2014|-)\\s*(\\d[\\d:.]+)\\]/;\nfor (const line of lines) {\n    const match = line.match(tsRegex);\n    if (match) {\n        lastTimestamp = timeToSeconds(match[1]);\n    }\n    lineTimestamps.push({line, timestamp: lastTimestamp});\n}\n\n// For each topic, extract relevant lines\nconst topicItems = [];\nfor (let i = 0; i < topics.length; i++) {\n    const topic = topics[i];\n    const tStart = topic.start || 0;\n    const tEnd = topic.end || 999999;\n    \n    const topicLines = lineTimestamps\n        .filter(lt => lt.timestamp >= tStart && lt.timestamp <= tEnd)\n        .map(lt => lt.line);\n    \n    const topicTranscript = topicLines.join('\\n');\n    \n    topicItems.push({\n        json: {\n            topicIndex: i,\n            topicName: topic.name,\n            topicSummary: topic.summary || '',\n            topicTranscript: topicTranscript,\n            totalTopics: topics.length,\n            speakerComment: speakerComment,\n            speakerMap: speakerMap,\n            date: date,\n            meetingName: meetingName,\n            startTime: startTime,\n            endTime: endTime,\n            participantStr: participantStr,\n            context: context,\n        }\n    });\n}\n\n// H1 fix: catch orphaned lines past the last topic's end timestamp\nif (topicItems.length > 0) {\n    const coveredMax = Math.max(...topics.map(t => t.end || 0));\n    const orphanLines = lineTimestamps\n        .filter(lt => lt.timestamp > coveredMax)\n        .map(lt => lt.line)\n        .filter(l => l.trim());\n    if (orphanLines.length > 0) {\n        // Append orphans to the last topic\n        const lastItem = topicItems[topicItems.length - 1];\n        lastItem.json.topicTranscript += '\\n' + orphanLines.join('\\n');\n    }\n}\n\n// If no topics extracted, pass through entire transcript as single topic\nif (topicItems.length === 0) {\n    topicItems.push({\n        json: {\n            topicIndex: 0,\n            topicName: 'Full Meeting',\n            topicSummary: 'Complete meeting discussion',\n            topicTranscript: resolvedTranscript,\n            totalTopics: 1,\n            speakerComment: speakerComment,\n            speakerMap: speakerMap,\n            date: date,\n            meetingName: meetingName,\n            startTime: startTime,\n            endTime: endTime,\n            participantStr: participantStr,\n            context: context,\n        }\n    });\n}\n\nreturn topicItems;\n"
       }
     },
     {
@@ -569,7 +536,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1752,
+        2152,
         300
       ],
       "parameters": {
@@ -583,7 +550,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1952,
+        2352,
         300
       ],
       "parameters": {
@@ -597,7 +564,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2152,
+        2552,
         300
       ],
       "parameters": {
@@ -644,6 +611,74 @@
         2700,
         400
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhookBody = $('Webhook').first().json.body;\nconst participants = webhookBody.participants;\nconst participantStr = Array.isArray(participants) && participants.length\n    ? participants.join(', ') : 'unknown';\nconst rawTranscript = $('Get Transcript').first().json.data || '';\n\n// Full transcript for speaker ID \u2014 even 83-min meetings (72k chars) fit in 32k tokens\n// Prompt eval dominates (~220s), generation is tiny (~50 tokens)\nconst MAX_CHARS = 75000;\nconst transcript = rawTranscript.length > MAX_CHARS\n    ? rawTranscript.substring(0, MAX_CHARS) + '\\n\\n[... truncated ...]'\n    : rawTranscript;\n\nconst systemPrompt = `You identify speakers in a meeting transcript.\n\nRULES:\n- Speakers already labeled with a real name (e.g. [Petri], [Mikko]) are biometrically verified. Do NOT change them. Map them to themselves.\n- Only identify unresolved labels: [SPEAKER_00], [SPEAKER_01], [Unknown], etc.\n- Look for self-introductions (\"I'm Johanna\"), direct address (\"Thanks Petri\"), role signals.\n- Cross-reference with known participants list.\n- If you cannot identify a speaker, keep the original label.\n\nOUTPUT FORMAT (strict JSON, no markdown, no explanation):\n{\"speaker_map\": {\"SPEAKER_00\": \"Identified Name\", \"SPEAKER_01\": \"SPEAKER_01\"}}`;\n\nconst userMsg = `Known participants: ${participantStr}\\n\\nTranscript:\\n${transcript}`;\n\nreturn [{ json: {\n    body: JSON.stringify({\n        model: 'qwen3.5:27b-32k',\n        stream: false,\n        think: false,\n        num_ctx: 32768,\n        system: systemPrompt,\n        prompt: userMsg\n    }),\n    participantStr: participantStr,\n    rawTranscript: rawTranscript\n} }];"
+      },
+      "id": "v2-build-speaker-id",
+      "name": "Build Speaker ID Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "v2-identify-speakers",
+      "name": "Identify Speakers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1352,
+        300
+      ],
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawTranscript = $('Get Transcript').first().json.data || '';\n\n// Parse speaker map from previous pass\nlet speakerMap = {};\nconst speakerResp = $input.first().json.response || '';\ntry {\n    let cleaned = speakerResp.trim();\n    if (cleaned.startsWith('```')) {\n        cleaned = cleaned.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '');\n    }\n    const parsed = JSON.parse(cleaned);\n    speakerMap = parsed.speaker_map || {};\n} catch(e) {\n    // No speaker map \u2014 proceed with original labels\n}\n\n// Apply speaker names to transcript for better topic identification\nlet resolvedTranscript = rawTranscript;\nfor (const [label, name] of Object.entries(speakerMap)) {\n    resolvedTranscript = resolvedTranscript.replaceAll('[' + label + ']', '[' + name + ']');\n}\n\n// Full transcript \u2014 same budget as speaker ID pass\nconst MAX_CHARS = 75000;\nconst transcript = resolvedTranscript.length > MAX_CHARS\n    ? resolvedTranscript.substring(0, MAX_CHARS) + '\\n\\n[... truncated ...]'\n    : resolvedTranscript;\n\nconst systemPrompt = `You identify discussion topics in a meeting transcript.\n\nFor each topic, provide:\n- A short descriptive name (3-8 words)\n- The start and end timestamps (from the [HH:MM:SS] markers in the transcript)\n- A one-sentence summary of the discussion\n\nOUTPUT FORMAT (strict JSON, no markdown, no explanation):\n{\"topics\": [\n  {\"name\": \"Project timeline update\", \"start\": 0.0, \"end\": 180.5, \"summary\": \"Discussed Q2 milestones\"},\n  {\"name\": \"Budget review\", \"start\": 181.0, \"end\": 450.2, \"summary\": \"Reviewed cost overruns\"}\n]}\n\nRULES:\n- Output ONLY valid JSON. No markdown fences, no explanation.\n- Every second of the transcript must be covered by exactly one topic.\n- Topics must be in chronological order with no gaps.\n- The LAST topic MUST have end: 999999 to capture all remaining content.\n- Merge very short topics (< 30s) into adjacent ones.\n- Typical meetings have 3-15 topics.`;\n\nconst userMsg = `Transcript:\\n${transcript}`;\n\nreturn [{ json: {\n    body: JSON.stringify({\n        model: 'qwen3.5:27b-32k',\n        stream: false,\n        think: false,\n        num_ctx: 32768,\n        system: systemPrompt,\n        prompt: userMsg\n    }),\n    speakerMapRaw: speakerResp,\n    speakerMap: speakerMap\n} }];"
+      },
+      "id": "v2-build-topic-seg",
+      "name": "Build Topic Segmentation Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "v2-identify-topics",
+      "name": "Identify Topics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1752,
+        300
+      ],
+      "retryOnFail": false
     }
   ],
   "connections": {
@@ -762,29 +797,7 @@
       "main": [
         [
           {
-            "node": "Build Speaker+Topic Prompt",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Speaker+Topic Prompt": {
-      "main": [
-        [
-          {
-            "node": "Identify Speakers and Topics",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Identify Speakers and Topics": {
-      "main": [
-        [
-          {
-            "node": "Slice Topics",
+            "node": "Build Speaker ID Prompt",
             "type": "main",
             "index": 0
           }
@@ -1049,6 +1062,50 @@
         [
           {
             "node": "Build Intel LLM Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Speaker ID Prompt": {
+      "main": [
+        [
+          {
+            "node": "Identify Speakers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identify Speakers": {
+      "main": [
+        [
+          {
+            "node": "Build Topic Segmentation Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Topic Segmentation Prompt": {
+      "main": [
+        [
+          {
+            "node": "Identify Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identify Topics": {
+      "main": [
+        [
+          {
+            "node": "Slice Topics",
             "type": "main",
             "index": 0
           }
