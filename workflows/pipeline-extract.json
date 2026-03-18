@@ -10,7 +10,36 @@
   },
   "nodes": [
     {
-      "parameters": {},
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "minutesText",
+              "type": "string"
+            },
+            {
+              "name": "meeting_name",
+              "type": "string"
+            },
+            {
+              "name": "participants",
+              "type": "string"
+            },
+            {
+              "name": "date",
+              "type": "string"
+            },
+            {
+              "name": "start_time",
+              "type": "string"
+            },
+            {
+              "name": "bot_token",
+              "type": "string"
+            }
+          ]
+        }
+      },
       "id": "368ed8d9-0d5d-411d-a101-a35b4cfe9d9c",
       "name": "Execute Workflow Trigger",
       "type": "n8n-nodes-base.executeWorkflowTrigger",

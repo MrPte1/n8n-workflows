@@ -10,7 +10,48 @@
   },
   "nodes": [
     {
-      "parameters": {},
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "minutesText",
+              "type": "string"
+            },
+            {
+              "name": "assembledMinutesJson",
+              "type": "object"
+            },
+            {
+              "name": "topics",
+              "type": "object"
+            },
+            {
+              "name": "analyzedTopics",
+              "type": "object"
+            },
+            {
+              "name": "meeting_name",
+              "type": "string"
+            },
+            {
+              "name": "participants",
+              "type": "string"
+            },
+            {
+              "name": "date",
+              "type": "string"
+            },
+            {
+              "name": "start_time",
+              "type": "string"
+            },
+            {
+              "name": "bot_token",
+              "type": "string"
+            }
+          ]
+        }
+      },
       "id": "92345d9f-9745-4c7e-9544-d05fa53ce65c",
       "name": "Execute Workflow Trigger",
       "type": "n8n-nodes-base.executeWorkflowTrigger",

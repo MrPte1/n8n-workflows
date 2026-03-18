@@ -10,7 +10,44 @@
   },
   "nodes": [
     {
-      "parameters": {},
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "transcript",
+              "type": "object"
+            },
+            {
+              "name": "file_id",
+              "type": "string"
+            },
+            {
+              "name": "bot_token",
+              "type": "string"
+            },
+            {
+              "name": "meeting_name",
+              "type": "string"
+            },
+            {
+              "name": "participants",
+              "type": "string"
+            },
+            {
+              "name": "date",
+              "type": "string"
+            },
+            {
+              "name": "start_time",
+              "type": "string"
+            },
+            {
+              "name": "job_id",
+              "type": "string"
+            }
+          ]
+        }
+      },
       "id": "25f395f5-7b23-4555-bbc1-07e169ae4f37",
       "name": "Execute Workflow Trigger",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
