@@ -17,6 +17,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - n8n_data:/home/node/.n8n
+      - /srv/transcribe/pipeline_done:/data/pipeline_done
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

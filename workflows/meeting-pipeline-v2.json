@@ -679,6 +679,43 @@
         300
       ],
       "retryOnFail": false
+    },
+    {
+      "parameters": {},
+      "id": "node-error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        400,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst wb = $('Webhook').first().json.body;\nconst queueId = wb.queue_id || 'unknown';\nconst meetingName = wb.meeting_name || '';\nconst doneDir = '/data/pipeline_done';\ntry { fs.mkdirSync(doneDir, { recursive: true }); } catch(e) {}\nfs.writeFileSync(doneDir + '/' + queueId + '.json', JSON.stringify({\n    queue_id: queueId,\n    meeting_name: meetingName,\n    status: 'complete',\n    completed_at: new Date().toISOString()\n}));\nreturn $input.all();"
+      },
+      "id": "node-mark-complete",
+      "name": "Mark Complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3760,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\n// Error trigger doesn't have access to Webhook data directly,\n// so we try to read from the execution context\nlet queueId = 'unknown';\nlet meetingName = '';\ntry {\n    const wb = $('Webhook').first().json.body;\n    queueId = wb.queue_id || 'unknown';\n    meetingName = wb.meeting_name || '';\n} catch(e) {}\nconst doneDir = '/data/pipeline_done';\ntry { fs.mkdirSync(doneDir, { recursive: true }); } catch(e) {}\nfs.writeFileSync(doneDir + '/' + queueId + '.json', JSON.stringify({\n    queue_id: queueId,\n    meeting_name: meetingName,\n    status: 'failed',\n    completed_at: new Date().toISOString(),\n    error: $input.first().json.execution?.error?.message || 'unknown error'\n}));\nreturn $input.all();"
+      },
+      "id": "node-mark-failed",
+      "name": "Mark Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        300
+      ]
     }
   ],
   "connections": {
@@ -1106,6 +1143,28 @@
         [
           {
             "node": "Slice Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Job": {
+      "main": [
+        [
+          {
+            "node": "Mark Complete",
             "type": "main",
             "index": 0
           }
