@@ -5,7 +5,8 @@
   "active": false,
   "isArchived": false,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "callerPolicy": "any"
   },
   "nodes": [
     {
