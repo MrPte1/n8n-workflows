@@ -555,7 +555,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const item = $input.item.json;\nconst bodyObj = JSON.parse(item.body);\n\n// Call Ollama via n8n built-in HTTP helper\nconst result = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://host.docker.internal:11434/api/generate',\n    body: bodyObj,\n    headers: {'Content-Type': 'application/json'},\n    timeout: 300000,\n    returnFullResponse: false,\n    json: true,\n});\n\nreturn {\n    json: {\n        response: result.response || '',\n        topicIndex: item.topicIndex,\n        topicName: item.topicName,\n        totalTopics: item.totalTopics,\n    }\n};"
+        "jsCode": "const item = $input.item.json;\nconst bodyObj = JSON.parse(item.body);\n\n// Call Ollama via n8n built-in HTTP helper\nconst result = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://host.docker.internal:11434/api/generate',\n    body: bodyObj,\n    headers: {'Content-Type': 'application/json'},\n    timeout: 600000,\n    returnFullResponse: false,\n    json: true,\n});\n\nreturn {\n    json: {\n        response: result.response || '',\n        topicIndex: item.topicIndex,\n        topicName: item.topicName,\n        totalTopics: item.totalTopics,\n    }\n};"
       }
     },
     {
@@ -600,7 +600,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.item.json;\nconst bodyObj = JSON.parse(item.body);\n\nconst result = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://host.docker.internal:11434/api/generate',\n    body: bodyObj,\n    headers: {'Content-Type': 'application/json'},\n    timeout: 300000,\n    returnFullResponse: false,\n    json: true,\n});\n\nreturn {\n    json: {\n        topicIntel: result.response || '',\n        topicIndex: item.topicIndex,\n        topicName: item.topicName,\n    }\n};",
+        "jsCode": "const item = $input.item.json;\nconst bodyObj = JSON.parse(item.body);\n\nconst result = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://host.docker.internal:11434/api/generate',\n    body: bodyObj,\n    headers: {'Content-Type': 'application/json'},\n    timeout: 600000,\n    returnFullResponse: false,\n    json: true,\n});\n\nreturn {\n    json: {\n        topicIntel: result.response || '',\n        topicIndex: item.topicIndex,\n        topicName: item.topicName,\n    }\n};",
         "mode": "runOnceForEachItem"
       },
       "id": "v2-analyze-topic-intel",
@@ -706,7 +706,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const fs = require('fs');\n// Error trigger doesn't have access to Webhook data directly,\n// so we try to read from the execution context\nlet queueId = 'unknown';\nlet meetingName = '';\ntry {\n    const wb = $('Webhook').first().json.body;\n    queueId = wb.queue_id || 'unknown';\n    meetingName = wb.meeting_name || '';\n} catch(e) {}\nconst doneDir = '/data/pipeline_done';\ntry { fs.mkdirSync(doneDir, { recursive: true }); } catch(e) {}\nfs.writeFileSync(doneDir + '/' + queueId + '.json', JSON.stringify({\n    queue_id: queueId,\n    meeting_name: meetingName,\n    status: 'failed',\n    completed_at: new Date().toISOString(),\n    error: $input.first().json.execution?.error?.message || 'unknown error'\n}));\nreturn $input.all();"
+        "jsCode": "const fs = require('fs');\nlet queueId = 'unknown';\nlet meetingName = '';\ntry {\n    const wb = $('Webhook').first().json.body;\n    queueId = wb.queue_id || 'unknown';\n    meetingName = wb.meeting_name || '';\n} catch(e) {\n    // Error trigger may not have Webhook context \u2014 try execution data\n    try {\n        const execData = $input.first().json;\n        // Look for queue_id in the execution metadata\n        if (execData.execution && execData.execution.data) {\n            const triggerData = execData.execution.data.resultData?.runData?.Webhook;\n            if (triggerData) {\n                const body = triggerData[0]?.data?.main?.[0]?.[0]?.json?.body;\n                if (body) {\n                    queueId = body.queue_id || 'unknown';\n                    meetingName = body.meeting_name || '';\n                }\n            }\n        }\n    } catch(e2) {}\n}\nconst doneDir = '/data/pipeline_done';\ntry { fs.mkdirSync(doneDir, { recursive: true }); } catch(e) {}\nconst errorMsg = $input.first().json.execution?.error?.message || 'unknown error';\nfs.writeFileSync(doneDir + '/' + queueId + '.json', JSON.stringify({\n    queue_id: queueId,\n    meeting_name: meetingName,\n    status: 'failed',\n    completed_at: new Date().toISOString(),\n    error: errorMsg\n}));\nreturn [{json: {queue_id: queueId, status: 'failed', error: errorMsg}}];"
       },
       "id": "node-mark-failed",
       "name": "Mark Failed",
