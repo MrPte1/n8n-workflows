@@ -152,12 +152,12 @@
     },
     {
       "parameters": {
-        "amount": 15
+        "jsCode": "// Sleep 15 seconds (replaces Wait node which doesn't work in sub-workflows)\nawait new Promise(resolve => setTimeout(resolve, 15000));\nreturn $input.all();"
       },
       "id": "b01f30e5-aeb5-41bf-ac8e-2d9502f33b56",
       "name": "Wait 15s",
-      "type": "n8n-nodes-base.wait",
-      "typeVersion": 1.1,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         1130,
         150
