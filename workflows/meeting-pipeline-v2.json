@@ -698,7 +698,7 @@
       "id": "node-mark-complete",
       "name": "Mark Complete",
       "type": "n8n-nodes-base.code",
-      "typeVersion": 1,
+      "typeVersion": 2,
       "position": [
         3760,
         -96
@@ -711,7 +711,7 @@
       "id": "node-mark-failed",
       "name": "Mark Failed",
       "type": "n8n-nodes-base.code",
-      "typeVersion": 1,
+      "typeVersion": 2,
       "position": [
         600,
         300
