@@ -165,11 +165,7 @@
     },
     {
       "parameters": {
-        "mode": "combine",
-        "mergeByFields": {
-          "values": []
-        },
-        "combinationMode": "mergeByPosition",
+        "mode": "append",
         "options": {}
       },
       "id": "5ee0f116-b898-4742-af27-a83366ccf7ee",
@@ -371,7 +367,7 @@
           {
             "node": "Wait For Both",
             "type": "main",
-            "index": 0
+            "index": 1
           }
         ]
       ]
