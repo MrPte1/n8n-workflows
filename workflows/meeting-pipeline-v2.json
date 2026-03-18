@@ -693,12 +693,12 @@
     },
     {
       "parameters": {
-        "jsCode": "const fs = require('fs');\nconst wb = $('Webhook').first().json.body;\nconst queueId = wb.queue_id || 'unknown';\nconst meetingName = wb.meeting_name || '';\nconst doneDir = '/data/pipeline_done';\ntry { fs.mkdirSync(doneDir, { recursive: true }); } catch(e) {}\nfs.writeFileSync(doneDir + '/' + queueId + '.json', JSON.stringify({\n    queue_id: queueId,\n    meeting_name: meetingName,\n    status: 'complete',\n    completed_at: new Date().toISOString()\n}));\nreturn $input.all();"
+        "command": "=mkdir -p /data/pipeline_done && printf '%s' '{\"queue_id\":\"{{ $('Webhook').first().json.body.queue_id }}\",\"meeting_name\":\"{{ $('Webhook').first().json.body.meeting_name }}\",\"status\":\"complete\",\"completed_at\":\"'\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"'\"}' > /data/pipeline_done/{{ $('Webhook').first().json.body.queue_id }}.json"
       },
       "id": "node-mark-complete",
       "name": "Mark Complete",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
       "position": [
         3760,
         -96
@@ -706,12 +706,12 @@
     },
     {
       "parameters": {
-        "jsCode": "const fs = require('fs');\nlet queueId = 'unknown';\nlet meetingName = '';\ntry {\n    const wb = $('Webhook').first().json.body;\n    queueId = wb.queue_id || 'unknown';\n    meetingName = wb.meeting_name || '';\n} catch(e) {\n    // Error trigger may not have Webhook context \u2014 try execution data\n    try {\n        const execData = $input.first().json;\n        // Look for queue_id in the execution metadata\n        if (execData.execution && execData.execution.data) {\n            const triggerData = execData.execution.data.resultData?.runData?.Webhook;\n            if (triggerData) {\n                const body = triggerData[0]?.data?.main?.[0]?.[0]?.json?.body;\n                if (body) {\n                    queueId = body.queue_id || 'unknown';\n                    meetingName = body.meeting_name || '';\n                }\n            }\n        }\n    } catch(e2) {}\n}\nconst doneDir = '/data/pipeline_done';\ntry { fs.mkdirSync(doneDir, { recursive: true }); } catch(e) {}\nconst errorMsg = $input.first().json.execution?.error?.message || 'unknown error';\nfs.writeFileSync(doneDir + '/' + queueId + '.json', JSON.stringify({\n    queue_id: queueId,\n    meeting_name: meetingName,\n    status: 'failed',\n    completed_at: new Date().toISOString(),\n    error: errorMsg\n}));\nreturn [{json: {queue_id: queueId, status: 'failed', error: errorMsg}}];"
+        "command": "=mkdir -p /data/pipeline_done && printf '%s' '{\"queue_id\":\"{{ $('Webhook').first().json.body.queue_id || \"unknown\" }}\",\"meeting_name\":\"{{ $('Webhook').first().json.body.meeting_name || \"\" }}\",\"status\":\"failed\",\"completed_at\":\"'\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"'\",\"error\":\"pipeline error\"}' > /data/pipeline_done/{{ $('Webhook').first().json.body.queue_id || \"unknown\" }}.json"
       },
       "id": "node-mark-failed",
       "name": "Mark Failed",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
       "position": [
         600,
         300
