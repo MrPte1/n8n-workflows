@@ -141,7 +141,7 @@
       "typeVersion": 1.2,
       "position": [
         1650,
-        -200
+        -96
       ],
       "onError": "continueRegularOutput"
     },
@@ -158,24 +158,10 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        1650,
-        50
-      ],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "mode": "append",
-        "options": {}
-      },
-      "id": "5ee0f116-b898-4742-af27-a83366ccf7ee",
-      "name": "Wait For Both",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
-      "position": [
         1900,
         -96
-      ]
+      ],
+      "onError": "continueRegularOutput"
     },
     {
       "id": "node-build-tg-body",
@@ -341,11 +327,6 @@
             "node": "Run Intel Report",
             "type": "main",
             "index": 0
-          },
-          {
-            "node": "Run Key Items Extract",
-            "type": "main",
-            "index": 0
           }
         ]
       ]
@@ -354,7 +335,7 @@
       "main": [
         [
           {
-            "node": "Wait For Both",
+            "node": "Run Key Items Extract",
             "type": "main",
             "index": 0
           }
@@ -362,17 +343,6 @@
       ]
     },
     "Run Key Items Extract": {
-      "main": [
-        [
-          {
-            "node": "Wait For Both",
-            "type": "main",
-            "index": 1
-          }
-        ]
-      ]
-    },
-    "Wait For Both": {
       "main": [
         [
           {
