@@ -1,0 +1,342 @@
+{
+  "id": "pipeline-transcribe",
+  "name": "Pipeline: Transcribe",
+  "description": "Sub-workflow: download audio, transcribe, diarize, warmup Ollama. Returns transcript + metadata.",
+  "active": false,
+  "isArchived": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d24d36ba-074e-47fd-8210-762cf84e2521",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reshape input \u2014 WF1 receives flat fields from orchestrator\nconst input = $input.first().json;\nreturn [{json: {\n  body: {\n    file_id: input.file_id || '',\n    bot_token: input.bot_token || '',\n    meeting_name: input.meeting_name || '',\n    participants: input.participants || '',\n    date: input.date || '',\n    start_time: input.start_time || '',\n  }\n}}];"
+      },
+      "id": "7effd411-1693-426e-acff-c3ec47c8e624",
+      "name": "Set Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/bot{{ $json.body.bot_token }}/getFile?file_id={{ $json.body.file_id }}",
+        "options": {}
+      },
+      "id": "26ddb4a7-43a7-44f3-8f8f-274e3f661891",
+      "name": "Get File Path",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        250,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/file/bot{{ $('Set Metadata').item.json.body.bot_token }}/{{ $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "59ad3f4a-97c4-4d2f-8062-662af55b3633",
+      "name": "Download Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        470,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/jobs",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "diarize",
+              "value": "true"
+            },
+            {
+              "name": "language_hint",
+              "value": "fi"
+            },
+            {
+              "name": "participants",
+              "value": "={{ $('Set Metadata').item.json.body.participants && $('Set Metadata').item.json.body.participants.length ? JSON.stringify($('Set Metadata').item.json.body.participants) : '[]' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6b0fb9b5-ba8e-45bd-a1c6-3f9968ea4d6d",
+      "name": "Submit Transcription Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        690,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/jobs/{{ $('Submit Transcription Job').item.json.job_id }}",
+        "options": {}
+      },
+      "id": "313a469f-f24b-4b1e-91a9-02beee04af9d",
+      "name": "Poll Job Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        910,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-done",
+              "leftValue": "={{ $json.status.status }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b80c49c3-3051-42c2-b091-bd762cbc8cc3",
+      "name": "Check Status",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1130,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 15
+      },
+      "id": "b01f30e5-aeb5-41bf-ac8e-2d9502f33b56",
+      "name": "Wait 15s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1130,
+        150
+      ],
+      "webhookId": "4da3c382-b085-45c0-9cf6-7502b0974ddf"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/jobs/{{ $('Submit Transcription Job').item.json.job_id }}/artifacts/transcript.txt",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "67b1fc54-b48e-4480-a210-e1d0594795ee",
+      "name": "Get Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1570,
+        0
+      ]
+    },
+    {
+      "id": "node-warmup-ollama",
+      "name": "Warmup Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1570,
+        150
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"model\":\"qwen3.5:27b-32k\",\"prompt\":\"hi\",\"stream\":false,\"think\":false,\"num_predict\":1}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect transcript data and pass metadata through\nconst transcript = $('Get Transcript').first().json;\nconst meta = $('Set Metadata').first().json.body;\nreturn [{json: {\n  transcript: transcript,\n  file_id: meta.file_id,\n  bot_token: meta.bot_token,\n  meeting_name: meta.meeting_name,\n  participants: meta.participants,\n  date: meta.date,\n  start_time: meta.start_time,\n  job_id: $('Submit Transcription Job').first().json.job_id || ''\n}}];"
+      },
+      "id": "00b10564-5abd-4acc-b4c9-4720125f5c29",
+      "name": "Return Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Metadata": {
+      "main": [
+        [
+          {
+            "node": "Get File Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Path": {
+      "main": [
+        [
+          {
+            "node": "Download Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Audio": {
+      "main": [
+        [
+          {
+            "node": "Submit Transcription Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Transcription Job": {
+      "main": [
+        [
+          {
+            "node": "Poll Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Job Status": {
+      "main": [
+        [
+          {
+            "node": "Check Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status": {
+      "main": [
+        [
+          {
+            "node": "Get Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 15s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 15s": {
+      "main": [
+        [
+          {
+            "node": "Poll Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Transcript": {
+      "main": [
+        [
+          {
+            "node": "Warmup Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Warmup Ollama": {
+      "main": [
+        [
+          {
+            "node": "Return Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

@@ -1,0 +1,162 @@
+{
+  "id": "pipeline-extract",
+  "name": "Pipeline: Key Items Extract",
+  "description": "Sub-workflow: extract key items (people, projects, tools, concepts, decisions, resources) from minutes.",
+  "active": false,
+  "isArchived": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "368ed8d9-0d5d-411d-a101-a35b4cfe9d9c",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reshape input to match original node expectations\nconst input = $input.first().json;\nreturn [{json: {\n  body: {\n    meeting_name: input.meeting_name || '',\n    participants: input.participants || '',\n    date: input.date || '',\n    start_time: input.start_time || '',\n  },\n  // Build Extract LLM Body expects $input.first().json.minutes (string)\n  // which was the assembled text \u2014 we receive it as minutesText\n  minutes: input.minutesText || ''\n}}];"
+      },
+      "id": "d1334cde-32e3-4b7a-bcd9-4f87443473c4",
+      "name": "Set Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "node-build-extract-llm-body",
+      "name": "Build Extract LLM Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        250,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst wb = $('Set Metadata').first().json.body;\nconst meetingName = wb.meeting_name || 'Meeting';\nconst minutes = $('Set Metadata').first().json.minutes || '';\n\nconst systemPrompt = 'You extract structured key items from meeting minutes into a companion reference note.\\nOutput ONLY valid markdown with no preamble or explanation.\\nBe factual \u2014 use only what is explicitly in the minutes.\\nWikilink items: people [[Lastname Firstname]] (family name first, ALWAYS reorder \u2014 e.g. \"Johanna Aivio\" becomes [[Aivio Johanna]]; ONLY if both names known; first-name-only = plain text), projects [[Project Name]], tools [[Tool Name]], concepts [[Concept]], resources [[Resource Name]]. Named items become atomic notes via /propagate.\\nOne sentence max per item. Omit sections with no content.';\n\nconst sections = '## People\\nEach person mentioned with role/context: - **[[Name]]** \\u2014 role\\n\\n## Projects & Initiatives\\n- **[[Project Name]]** \\u2014 description, status\\n\\n## Tools & Technologies\\n- **[[Tool Name]]** \\u2014 usage context\\n\\n## Concepts & Terms\\n- **[[Term]]** \\u2014 definition or context\\n\\n## Resources & References\\n- **[[Resource]]** \\u2014 context';\n\nconst userMsg = 'Extract key items from these meeting minutes. Use the headings below; omit any section with no content.\\n\\n' + sections + '\\n\\n---\\nMEETING MINUTES:\\n' + minutes;\n\nreturn [{ json: { body: JSON.stringify({\n    model: 'qwen3.5:27b-32k',\n    stream: false,\n    think: false,\n    num_ctx: 32768,\n    system: systemPrompt,\n    prompt: userMsg\n}) } }];\n"
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-generate-key-items",
+      "name": "Generate Key Items",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-build-extract-note-body",
+      "name": "Build Extract Note Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst wb = $('Set Metadata').first().json.body;\nconst date = wb.date || new Date().toISOString().split('T')[0];\nconst meetingName = wb.meeting_name || 'Meeting';\nconst resp = $input.first().json;\nconst extract = resp.response || '';\nif (!extract) { return [{ json: { extractPath: '102 - Meeting Extracts/(extract skipped \u2014 LLM returned empty)' } }]; }\n\nconst now = new Date();\nconst _hTime = new Date(now.toLocaleString('en-US', {timeZone: 'Europe/Helsinki'}));\nconst _pad = n => String(n).padStart(2, '0');\nconst createdAt = `${_hTime.getFullYear()}-${_pad(_hTime.getMonth()+1)}-${_pad(_hTime.getDate())} ${_pad(_hTime.getHours())}:${_pad(_hTime.getMinutes())}`;\n\nconst safeName = meetingName.replace(/[\\/\\\\:*?\"<>|]/g, '-');\nconst path = `102 - Meeting Extracts/${date} ${safeName} - Key Items.md`;\nconst minutePath = `100 - Meeting minutes/${date} ${safeName}.md`;\nconst intelPath = `101 - Meeting Intelligence Reports/${date} ${safeName} - Intelligence Report.md`;\n\nconst participants = (wb.participants || []).join(', ');\nconst frontmatter = `---\\nmeeting: \"[[${minutePath}]]\"\\ndate: ${date}\\nparticipants: [${participants}]\\ntags: [meeting-extract]\\n---\\n\\n`;\nconst header = `Extract created: ${createdAt}\\nTemplate Version: M20.1\\n\\n---\\n\\n`;\nconst crossLinks = `\\n\\n---\\n\\n*[[${minutePath}]] \\u00b7 [[${intelPath}]]*`;\n\nreturn [{ json: { body: JSON.stringify({ path, content: frontmatter + header + extract + crossLinks, overwrite: true }), extractPath: path } }];\n"
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-create-extract-note",
+      "name": "Create Extract Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1000,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8090/api/create_note",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Metadata": {
+      "main": [
+        [
+          {
+            "node": "Build Extract LLM Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Extract LLM Body": {
+      "main": [
+        [
+          {
+            "node": "Generate Key Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Key Items": {
+      "main": [
+        [
+          {
+            "node": "Build Extract Note Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Extract Note Body": {
+      "main": [
+        [
+          {
+            "node": "Create Extract Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
