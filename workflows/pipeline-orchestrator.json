@@ -69,8 +69,10 @@
     },
     {
       "parameters": {
-        "source": "parameter",
-        "workflowId": "pipeline-transcribe",
+        "source": "database",
+        "workflowId": {
+          "value": "pipeline-transcribe"
+        },
         "options": {}
       },
       "id": "5e1b5054-757f-49e6-9121-e304558ac980",
@@ -97,8 +99,10 @@
     },
     {
       "parameters": {
-        "source": "parameter",
-        "workflowId": "pipeline-analyze",
+        "source": "database",
+        "workflowId": {
+          "value": "pipeline-analyze"
+        },
         "options": {}
       },
       "id": "a09f7b16-8785-43ef-8bc1-ec94fcfcf3ce",
@@ -125,8 +129,10 @@
     },
     {
       "parameters": {
-        "source": "parameter",
-        "workflowId": "pipeline-intel",
+        "source": "database",
+        "workflowId": {
+          "value": "pipeline-intel"
+        },
         "options": {}
       },
       "id": "bada832a-4f2c-4c72-84d5-24a87b0bd06a",
@@ -141,8 +147,10 @@
     },
     {
       "parameters": {
-        "source": "parameter",
-        "workflowId": "pipeline-extract",
+        "source": "database",
+        "workflowId": {
+          "value": "pipeline-extract"
+        },
         "options": {}
       },
       "id": "5f38ce0c-6655-4d71-bf42-3c2ce3ce6e81",
