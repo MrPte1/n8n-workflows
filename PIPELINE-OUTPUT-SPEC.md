@@ -142,9 +142,9 @@ Pipeline: divide-and-conquer (M59)
 
 | Rule | Value |
 |------|-------|
-| Count | 3-7 per topic |
-| Attribution | Every key point attributed to the speaker who made it |
-| Specificity | Include numbers, systems, dates, owners — never vague |
+| Count | 3-5 per topic |
+| Attribution | Only when speaker is decision-maker, action owner, or attribution adds critical context |
+| Specificity | Focus on outcomes, decisions, conclusions — include numbers, dates, specifics where relevant |
 | No action items | Action items go in ACTION ITEMS section, not key points |
 | No complexity emojis | Emojis only on action item lines |
 
