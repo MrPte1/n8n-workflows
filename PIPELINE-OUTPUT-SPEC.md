@@ -143,8 +143,9 @@ Pipeline: divide-and-conquer (M59)
 | Rule | Value |
 |------|-------|
 | Count | 3-5 per topic |
-| Attribution | Only when speaker is decision-maker, action owner, or attribution adds critical context |
-| Specificity | Focus on outcomes, decisions, conclusions — include numbers, dates, specifics where relevant |
+| Style | Executive board summary — impersonal, factual, outcome-focused |
+| Attribution | Name speakers max 1-2 per topic; only when decision-maker, action owner, or critical context |
+| Specificity | Focus on WHAT happened/decided/concluded — include numbers, dates, specifics where relevant |
 | No action items | Action items go in ACTION ITEMS section, not key points |
 | No complexity emojis | Emojis only on action item lines |
 
