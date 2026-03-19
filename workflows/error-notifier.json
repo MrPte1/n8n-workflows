@@ -8,7 +8,10 @@
       "name": "Error Trigger",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "parameters": {}
     },
     {
@@ -16,35 +19,56 @@
       "name": "Build Error Body",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [240, 0],
+      "position": [
+        240,
+        0
+      ],
       "parameters": {
-        "jsCode": "const err = $input.first().json;\nconst node = (err.execution && err.execution.lastNodeExecuted) || 'unknown node';\nconst msg  = (err.execution && err.execution.error && err.execution.error.message) || 'unknown error';\nconst wf   = (err.workflow && err.workflow.name) || 'pipeline';\n\nconst text = '\u26a0\ufe0f <b>Pipeline failed</b>\\n<b>Workflow:</b> ' + wf + '\\n<b>Failed at:</b> <code>' + node + '</code>\\n<b>Error:</b> <code>' + msg.substring(0, 300) + '</code>';\n\nreturn [{ json: { text } }];"
+        "jsCode": "const err = $input.first().json;\nconst node = (err.execution && err.execution.lastNodeExecuted) || 'unknown node';\nconst msg  = (err.execution && err.execution.error && err.execution.error.message) || 'unknown error';\nconst wf   = (err.workflow && err.workflow.name) || 'pipeline';\n\nconst text = '\u26a0\ufe0f <b>Pipeline failed</b>\\n<b>Workflow:</b> ' + wf + '\\n<b>Failed at:</b> <code>' + node + '</code>\\n<b>Error:</b> <code>' + msg.substring(0, 300) + '</code>';\n\nconst body = {\n  chat_id: '1502389483',\n  text: text,\n  parse_mode: 'HTML'\n};\n\nreturn [{ json: { body: JSON.stringify(body), bot_token: '8699271183:AAF6LJ1GjgYcpNiJVcDEQmHZ3GmsLRlAaUU' } }];"
       }
     },
     {
       "id": "node-send-error-tg",
       "name": "Send Error Notification",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
-      "position": [480, 0],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
       "parameters": {
-        "resource": "message",
-        "operation": "sendMessage",
-        "chatId": "1502389483",
-        "text": "={{ $json.text }}",
-        "additionalFields": {
-          "parse_mode": "HTML"
-        }
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $json.bot_token }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
       },
       "credentials": {}
     }
   ],
   "connections": {
     "Error Trigger": {
-      "main": [[{ "node": "Build Error Body", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Build Error Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Error Body": {
-      "main": [[{ "node": "Send Error Notification", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Send Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
