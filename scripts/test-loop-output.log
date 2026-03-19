@@ -1,0 +1,35 @@
+
+=========================================
+ITERATION 1 of 3
+=========================================
+Triggering pipeline...
+Webhook OK (200). Waiting for completion...
+Pipeline completed in ~0 min
+ERROR: Minutes file not created!
+
+=========================================
+ITERATION 2 of 3
+=========================================
+Triggering pipeline...
+Webhook OK (200). Waiting for completion...
+Pipeline completed in ~0 min
+ERROR: Minutes file not created!
+
+=========================================
+ITERATION 3 of 3
+=========================================
+Triggering pipeline...
+Webhook OK (200). Waiting for completion...
+Pipeline completed in ~0 min
+ERROR: Minutes file not created!
+
+Report saved to: /home/ai_admin/Projects/n8n-workflows/scripts/test-report.md
+# Pipeline Test Loop Report
+Started: 2026-03-19 20:11:13 EET
+Max iterations: 3
+
+## Iteration 1 — NO OUTPUT (0m)
+## Iteration 2 — NO OUTPUT (0m)
+## Iteration 3 — NO OUTPUT (0m)
+
+Completed: 2026-03-19 20:11:28 EET

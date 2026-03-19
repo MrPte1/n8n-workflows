@@ -133,16 +133,27 @@ check_quality() {
     return $issues
 }
 
-# Wait for pipeline completion (polls queue state)
+# Wait for pipeline completion (polls for output file + sentinel)
 wait_for_completion() {
     local timeout=5400  # 90 min max
     local elapsed=0
     local interval=30
+    local target_file="$VAULT/100 - Meeting minutes/2026-03-18 TEST Delivery Readiness Weekly.md"
 
     while [ $elapsed -lt $timeout ]; do
-        local active
-        active=$(python3 -c "import json;d=json.load(open('$QUEUE_STATE'));print('yes' if d.get('active') else 'no')" 2>/dev/null || echo "yes")
-        if [ "$active" = "no" ]; then
+        # Check if output file exists (primary signal)
+        if [ -f "$target_file" ]; then
+            echo "  Output file detected after ${elapsed}s"
+            # Give pipeline a few more seconds to finish writing
+            sleep 10
+            return 0
+        fi
+        # Also check sentinel directory for new files
+        local new_sentinel
+        new_sentinel=$(find "$DONE_DIR" -name "*.json" -newer /tmp/pipeline-test-marker -type f 2>/dev/null | head -1)
+        if [ -n "$new_sentinel" ]; then
+            echo "  Sentinel file detected: $new_sentinel"
+            sleep 5
             return 0
         fi
         sleep $interval
@@ -167,17 +178,16 @@ for i in $(seq 1 "$MAX_ITER"); do
     echo "========================================="
     START_TIME=$(date +%s)
 
-    # Check if queue is clear
-    active=$(python3 -c "import json;d=json.load(open('$QUEUE_STATE'));print('yes' if d.get('active') else 'no')" 2>/dev/null || echo "no")
-    if [ "$active" = "yes" ]; then
-        echo "Queue busy, waiting for current pipeline..."
-        wait_for_completion
-    fi
+    # Brief pause to ensure services are ready
+    sleep 2
 
     # Delete previous test output
     rm -f "$VAULT/100 - Meeting minutes/2026-03-18 TEST Delivery Readiness Weekly.md"
     rm -f "$VAULT/101 - Meeting Intelligence Reports/2026-03-18 TEST Delivery Readiness Weekly - Intelligence Report.md"
     rm -f "$VAULT/102 - Meeting Extracts/2026-03-18 TEST Delivery Readiness Weekly - Key Items.md"
+
+    # Create timestamp marker for sentinel detection
+    touch /tmp/pipeline-test-marker
 
     # Trigger pipeline
     echo "Triggering pipeline..."
