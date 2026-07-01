@@ -14,11 +14,14 @@ REPORT_FILE="/home/ai_admin/Projects/n8n-workflows/scripts/test-report.md"
 LOG_DIR="/home/ai_admin/Projects/n8n-workflows/scripts/test-logs"
 mkdir -p "$LOG_DIR"
 
+: "${PIPELINE_CHAT_ID:?PIPELINE_CHAT_ID must be set (see .env.example)}"
+: "${PIPELINE_BOT_TOKEN:?PIPELINE_BOT_TOKEN must be set (see .env.example)}"
+
 # Test audio: 37-min "Delivery Readiness Weekly" (shorter, faster iteration)
 TEST_PAYLOAD='{
   "file_id": "CQACAgQAAxkBAAIG-Gm8HUcKl9S5-_QbGuGTzXIdqYtIAAIpIQACCjXgUQdYS6QeMJvgOgQ",
-  "chat_id": "1502389483",
-  "bot_token": "8699271183:AAF6LJ1GjgYcpNiJVcDEQmHZ3GmsLRlAaUU",
+  "chat_id": "'"$PIPELINE_CHAT_ID"'",
+  "bot_token": "'"$PIPELINE_BOT_TOKEN"'",
   "meeting_name": "TEST Delivery Readiness Weekly",
   "participants": ["Rantala Petri", "Rita Päivi", "Hahtola Jaakko", "Kuivaniemi Aku", "Syvänen Sirpa", "Äijälä Heidi"],
   "date": "2026-03-18",
